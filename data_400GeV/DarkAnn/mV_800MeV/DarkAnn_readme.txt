@@ -1,0 +1,156 @@
+Integrators for DarkAnn
+
+Energy/GeV |  Filename
+
+  626.286  |  DarkAnn_0.p
+  626.293  |  DarkAnn_1.p
+  626.299  |  DarkAnn_2.p
+  626.307  |  DarkAnn_3.p
+  626.315  |  DarkAnn_4.p
+  626.323  |  DarkAnn_5.p
+  626.333  |  DarkAnn_6.p
+  626.344  |  DarkAnn_7.p
+  626.355  |  DarkAnn_8.p
+  626.368  |  DarkAnn_9.p
+  626.382  |  DarkAnn_10.p
+  626.397  |  DarkAnn_11.p
+  626.414  |  DarkAnn_12.p
+  626.433  |  DarkAnn_13.p
+  626.453  |  DarkAnn_14.p
+  626.475  |  DarkAnn_15.p
+  626.500  |  DarkAnn_16.p
+  626.526  |  DarkAnn_17.p
+  626.556  |  DarkAnn_18.p
+  626.588  |  DarkAnn_19.p
+  626.623  |  DarkAnn_20.p
+  626.662  |  DarkAnn_21.p
+  626.705  |  DarkAnn_22.p
+  626.751  |  DarkAnn_23.p
+  626.803  |  DarkAnn_24.p
+  626.859  |  DarkAnn_25.p
+  626.920  |  DarkAnn_26.p
+  626.988  |  DarkAnn_27.p
+  627.062  |  DarkAnn_28.p
+  627.144  |  DarkAnn_29.p
+  627.233  |  DarkAnn_30.p
+  627.331  |  DarkAnn_31.p
+  627.438  |  DarkAnn_32.p
+  627.556  |  DarkAnn_33.p
+  627.686  |  DarkAnn_34.p
+  627.827  |  DarkAnn_35.p
+  627.983  |  DarkAnn_36.p
+  628.154  |  DarkAnn_37.p
+  628.341  |  DarkAnn_38.p
+  628.547  |  DarkAnn_39.p
+  628.772  |  DarkAnn_40.p
+  629.020  |  DarkAnn_41.p
+  629.291  |  DarkAnn_42.p
+  629.589  |  DarkAnn_43.p
+  629.916  |  DarkAnn_44.p
+  630.274  |  DarkAnn_45.p
+  630.667  |  DarkAnn_46.p
+  631.099  |  DarkAnn_47.p
+  631.572  |  DarkAnn_48.p
+  632.091  |  DarkAnn_49.p
+  632.661  |  DarkAnn_50.p
+  633.286  |  DarkAnn_51.p
+  633.971  |  DarkAnn_52.p
+  634.724  |  DarkAnn_53.p
+  635.549  |  DarkAnn_54.p
+  636.454  |  DarkAnn_55.p
+  637.447  |  DarkAnn_56.p
+  638.537  |  DarkAnn_57.p
+  639.732  |  DarkAnn_58.p
+  641.044  |  DarkAnn_59.p
+  642.482  |  DarkAnn_60.p
+  644.061  |  DarkAnn_61.p
+  645.792  |  DarkAnn_62.p
+  647.692  |  DarkAnn_63.p
+  649.776  |  DarkAnn_64.p
+  652.063  |  DarkAnn_65.p
+  654.571  |  DarkAnn_66.p
+  657.323  |  DarkAnn_67.p
+  660.343  |  DarkAnn_68.p
+  663.655  |  DarkAnn_69.p
+  667.289  |  DarkAnn_70.p
+  671.275  |  DarkAnn_71.p
+  675.649  |  DarkAnn_72.p
+  680.447  |  DarkAnn_73.p
+  685.712  |  DarkAnn_74.p
+  691.487  |  DarkAnn_75.p
+  697.823  |  DarkAnn_76.p
+  704.774  |  DarkAnn_77.p
+  712.399  |  DarkAnn_78.p
+  720.766  |  DarkAnn_79.p
+  729.944  |  DarkAnn_80.p
+  740.013  |  DarkAnn_81.p
+  751.060  |  DarkAnn_82.p
+  763.180  |  DarkAnn_83.p
+  776.476  |  DarkAnn_84.p
+  791.062  |  DarkAnn_85.p
+  807.065  |  DarkAnn_86.p
+  824.622  |  DarkAnn_87.p
+  843.883  |  DarkAnn_88.p
+  865.013  |  DarkAnn_89.p
+  888.195  |  DarkAnn_90.p
+  913.628  |  DarkAnn_91.p
+  941.530  |  DarkAnn_92.p
+  972.141  |  DarkAnn_93.p
+ 1005.723  |  DarkAnn_94.p
+ 1042.566  |  DarkAnn_95.p
+ 1082.985  |  DarkAnn_96.p
+ 1127.328  |  DarkAnn_97.p
+ 1175.977  |  DarkAnn_98.p
+ 1229.348  |  DarkAnn_99.p
+ 1287.901  |  DarkAnn_100.p
+ 1352.138  |  DarkAnn_101.p
+ 1422.611  |  DarkAnn_102.p
+ 1499.926  |  DarkAnn_103.p
+ 1584.747  |  DarkAnn_104.p
+ 1677.802  |  DarkAnn_105.p
+ 1779.892  |  DarkAnn_106.p
+ 1891.892  |  DarkAnn_107.p
+ 2014.766  |  DarkAnn_108.p
+ 2149.569  |  DarkAnn_109.p
+ 2297.459  |  DarkAnn_110.p
+ 2459.706  |  DarkAnn_111.p
+ 2637.704  |  DarkAnn_112.p
+ 2832.983  |  DarkAnn_113.p
+ 3047.220  |  DarkAnn_114.p
+ 3282.256  |  DarkAnn_115.p
+ 3540.109  |  DarkAnn_116.p
+ 3822.996  |  DarkAnn_117.p
+ 4133.345  |  DarkAnn_118.p
+ 4473.824  |  DarkAnn_119.p
+ 4847.358  |  DarkAnn_120.p
+ 5257.154  |  DarkAnn_121.p
+ 5706.735  |  DarkAnn_122.p
+ 6199.962  |  DarkAnn_123.p
+ 6741.073  |  DarkAnn_124.p
+ 7334.716  |  DarkAnn_125.p
+ 7985.991  |  DarkAnn_126.p
+ 8700.493  |  DarkAnn_127.p
+ 9484.361  |  DarkAnn_128.p
+10344.328  |  DarkAnn_129.p
+11287.783  |  DarkAnn_130.p
+12322.831  |  DarkAnn_131.p
+13458.363  |  DarkAnn_132.p
+14704.135  |  DarkAnn_133.p
+16070.849  |  DarkAnn_134.p
+17570.247  |  DarkAnn_135.p
+19215.210  |  DarkAnn_136.p
+21019.869  |  DarkAnn_137.p
+22999.729  |  DarkAnn_138.p
+25171.798  |  DarkAnn_139.p
+27554.735  |  DarkAnn_140.p
+30169.014  |  DarkAnn_141.p
+33037.093  |  DarkAnn_142.p
+36183.611  |  DarkAnn_143.p
+39635.599  |  DarkAnn_144.p
+43422.715  |  DarkAnn_145.p
+47577.492  |  DarkAnn_146.p
+52135.623  |  DarkAnn_147.p
+57136.268  |  DarkAnn_148.p
+62622.387  |  DarkAnn_149.p
+
+Integrators made on 2025-05-11 19:32:45.126841

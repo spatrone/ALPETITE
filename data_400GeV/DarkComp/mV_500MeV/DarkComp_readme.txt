@@ -1,0 +1,156 @@
+Integrators for DarkComp
+
+Energy/GeV |  Filename
+
+  245.143  |  DarkComp_0.p
+  245.146  |  DarkComp_1.p
+  245.148  |  DarkComp_2.p
+  245.151  |  DarkComp_3.p
+  245.154  |  DarkComp_4.p
+  245.158  |  DarkComp_5.p
+  245.162  |  DarkComp_6.p
+  245.166  |  DarkComp_7.p
+  245.170  |  DarkComp_8.p
+  245.175  |  DarkComp_9.p
+  245.181  |  DarkComp_10.p
+  245.187  |  DarkComp_11.p
+  245.193  |  DarkComp_12.p
+  245.201  |  DarkComp_13.p
+  245.209  |  DarkComp_14.p
+  245.217  |  DarkComp_15.p
+  245.227  |  DarkComp_16.p
+  245.237  |  DarkComp_17.p
+  245.249  |  DarkComp_18.p
+  245.261  |  DarkComp_19.p
+  245.275  |  DarkComp_20.p
+  245.290  |  DarkComp_21.p
+  245.307  |  DarkComp_22.p
+  245.325  |  DarkComp_23.p
+  245.345  |  DarkComp_24.p
+  245.367  |  DarkComp_25.p
+  245.392  |  DarkComp_26.p
+  245.418  |  DarkComp_27.p
+  245.447  |  DarkComp_28.p
+  245.479  |  DarkComp_29.p
+  245.514  |  DarkComp_30.p
+  245.552  |  DarkComp_31.p
+  245.594  |  DarkComp_32.p
+  245.640  |  DarkComp_33.p
+  245.691  |  DarkComp_34.p
+  245.747  |  DarkComp_35.p
+  245.808  |  DarkComp_36.p
+  245.874  |  DarkComp_37.p
+  245.948  |  DarkComp_38.p
+  246.028  |  DarkComp_39.p
+  246.116  |  DarkComp_40.p
+  246.213  |  DarkComp_41.p
+  246.320  |  DarkComp_42.p
+  246.436  |  DarkComp_43.p
+  246.564  |  DarkComp_44.p
+  246.704  |  DarkComp_45.p
+  246.858  |  DarkComp_46.p
+  247.027  |  DarkComp_47.p
+  247.212  |  DarkComp_48.p
+  247.416  |  DarkComp_49.p
+  247.639  |  DarkComp_50.p
+  247.883  |  DarkComp_51.p
+  248.151  |  DarkComp_52.p
+  248.446  |  DarkComp_53.p
+  248.769  |  DarkComp_54.p
+  249.123  |  DarkComp_55.p
+  249.512  |  DarkComp_56.p
+  249.938  |  DarkComp_57.p
+  250.406  |  DarkComp_58.p
+  250.920  |  DarkComp_59.p
+  251.483  |  DarkComp_60.p
+  252.101  |  DarkComp_61.p
+  252.778  |  DarkComp_62.p
+  253.522  |  DarkComp_63.p
+  254.338  |  DarkComp_64.p
+  255.233  |  DarkComp_65.p
+  256.215  |  DarkComp_66.p
+  257.292  |  DarkComp_67.p
+  258.474  |  DarkComp_68.p
+  259.770  |  DarkComp_69.p
+  261.193  |  DarkComp_70.p
+  262.753  |  DarkComp_71.p
+  264.465  |  DarkComp_72.p
+  266.343  |  DarkComp_73.p
+  268.404  |  DarkComp_74.p
+  270.664  |  DarkComp_75.p
+  273.144  |  DarkComp_76.p
+  275.865  |  DarkComp_77.p
+  278.850  |  DarkComp_78.p
+  282.125  |  DarkComp_79.p
+  285.717  |  DarkComp_80.p
+  289.659  |  DarkComp_81.p
+  293.983  |  DarkComp_82.p
+  298.727  |  DarkComp_83.p
+  303.931  |  DarkComp_84.p
+  309.641  |  DarkComp_85.p
+  315.904  |  DarkComp_86.p
+  322.776  |  DarkComp_87.p
+  330.316  |  DarkComp_88.p
+  338.587  |  DarkComp_89.p
+  347.661  |  DarkComp_90.p
+  357.616  |  DarkComp_91.p
+  368.537  |  DarkComp_92.p
+  380.519  |  DarkComp_93.p
+  393.664  |  DarkComp_94.p
+  408.085  |  DarkComp_95.p
+  423.906  |  DarkComp_96.p
+  441.263  |  DarkComp_97.p
+  460.305  |  DarkComp_98.p
+  481.196  |  DarkComp_99.p
+  504.115  |  DarkComp_100.p
+  529.259  |  DarkComp_101.p
+  556.844  |  DarkComp_102.p
+  587.107  |  DarkComp_103.p
+  620.308  |  DarkComp_104.p
+  656.732  |  DarkComp_105.p
+  696.692  |  DarkComp_106.p
+  740.532  |  DarkComp_107.p
+  788.627  |  DarkComp_108.p
+  841.392  |  DarkComp_109.p
+  899.280  |  DarkComp_110.p
+  962.787  |  DarkComp_111.p
+ 1032.460  |  DarkComp_112.p
+ 1108.897  |  DarkComp_113.p
+ 1192.754  |  DarkComp_114.p
+ 1284.753  |  DarkComp_115.p
+ 1385.683  |  DarkComp_116.p
+ 1496.411  |  DarkComp_117.p
+ 1617.889  |  DarkComp_118.p
+ 1751.161  |  DarkComp_119.p
+ 1897.371  |  DarkComp_120.p
+ 2057.775  |  DarkComp_121.p
+ 2233.752  |  DarkComp_122.p
+ 2426.813  |  DarkComp_123.p
+ 2638.616  |  DarkComp_124.p
+ 2870.982  |  DarkComp_125.p
+ 3125.907  |  DarkComp_126.p
+ 3405.580  |  DarkComp_127.p
+ 3712.404  |  DarkComp_128.p
+ 4049.016  |  DarkComp_129.p
+ 4418.306  |  DarkComp_130.p
+ 4823.449  |  DarkComp_131.p
+ 5267.923  |  DarkComp_132.p
+ 5755.548  |  DarkComp_133.p
+ 6290.512  |  DarkComp_134.p
+ 6877.412  |  DarkComp_135.p
+ 7521.290  |  DarkComp_136.p
+ 8227.676  |  DarkComp_137.p
+ 9002.640  |  DarkComp_138.p
+ 9852.840  |  DarkComp_139.p
+10785.578  |  DarkComp_140.p
+11808.869  |  DarkComp_141.p
+12931.503  |  DarkComp_142.p
+14163.125  |  DarkComp_143.p
+15514.315  |  DarkComp_144.p
+16996.682  |  DarkComp_145.p
+18622.960  |  DarkComp_146.p
+20407.121  |  DarkComp_147.p
+22364.493  |  DarkComp_148.p
+24511.890  |  DarkComp_149.p
+
+Integrators made on 2025-05-11 19:32:36.031571

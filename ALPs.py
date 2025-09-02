@@ -2173,155 +2173,339 @@ class AxionShower:
         print("\n✅ All processes finalized.\n")
         return created_dirs_by_mass
     
-    def plot_histo_flux(self, ma, folder_name='PLOT', w=5, h=4, legend_title_text=None,
-                    bins_per_decade=20, log_scale=True, weights_to_use=None,
-                    gaee_factor=None, gayy_factor=None, xlim=None, ylim=None, plot_subprocesses=False, save_plot=True, plot_filename='Flux.png',plot_title=''):
+    def plot_histo_flux(self, masses, folder_name='PLOT', w=5, h=4, legend_title_text=None,
+                        bins_per_decade=20, log_scale=True, weights_to_use=None,
+                        gaee_factor=None, gayy_factor=None, xlim=None, ylim=None,
+                        plot_subprocesses=False, processes_to_plot=None,
+                        save_plot=True, plot_filename='Flux.png', plot_title=''):
         """
         Plots a publication-quality axion flux histogram from finalized data.
 
-        This function uses a helper to set a precise figure size and applies styling
-        to closely match professional examples. It correctly loads data from the
-        `folder_name/<mass>/<ProcessName>.pkl` structure.
+        This enhanced function can plot data for multiple masses on the same axes and allows
+        for plotting only specific, user-defined particle production processes.
 
         Args:
-            ma (float): The specific axion mass to plot.
+            masses (float or list of float): A single axion mass or a list of masses to plot.
             folder_name (str): The directory containing the finalized data.
             w, h (float): The target width and height of the axes area in inches.
             legend_title_text (str): Optional title for the plot legend.
-            bins_per_decade (int, optional): Number of bins per decade of energy. Defaults to 20.
+            bins_per_decade (int): Number of bins per decade of energy.
             log_scale (bool): Use logarithmic scale for the y-axis if True.
             weights_to_use (list of str): List of weight keys to multiply from the data.
-            lim (tuple, optional): A tuple (xmin, xmax) to manually set the x-axis limits.
-            ylim (tuple, optional): A tuple (ymin, ymax) to manually set the y-axis limits.
+            gaee_factor, gayy_factor (float, optional): Rescaling factors for couplings.
+            xlim, ylim (tuple, optional): Manually set the x/y-axis limits.
             plot_subprocesses (bool): If True, plots individual contributions (e.g., Annihilation,
-                                      Compton) separately instead of combining them. Defaults to False.
+                                      Compton) separately. This is ignored if `processes_to_plot` is set.
+            processes_to_plot (list of str, optional): A list of process keys to plot exclusively.
+                                                      If None, plots default combinations. Available keys are:
+                                                      'ann', 'comp', 'brem_el', 'brem_pos',
+                                                      'primakoff_shower', 'brem_primary', 'primakoff_primary'.
+            save_plot (bool): If True, saves the plot to a file.
+            plot_filename (str): The filename for the saved plot.
+            plot_title (str): Additional text to append to the plot title.
         """
-        # --- 1. Setup Paths, Plotting Style, and Process Mappings ---
+        # --- 1. Setup: Normalize Inputs, Styles, and Process Definitions ---
         plt.rc('text', usetex=True)
         plt.rc('font', family='serif')
 
-        mass_dir_path = os.path.join(self.DATA_folder_path, folder_name, str(ma))
-        if not os.path.isdir(mass_dir_path):
-            print(f"[Error] Directory for mass '{ma}' not found. Please run `finalize_data()`.")
-            return
+        # Normalize the 'masses' input to always be a list for consistent looping
+        if not isinstance(masses, list):
+            masses = [masses]
 
-        process_filename_map = {
-            'ann': 'Annihilation.pkl', 'comp': 'Compton.pkl', 'brem_el': 'Brem_el.pkl',
-            'brem_pos': 'Brem_pos.pkl', 'primakoff_shower': 'Primakoff_shower.pkl',
-            'brem_primary': 'Brem_primary.pkl', 'primakoff_primary': 'Primakoff_primary.pkl'
+        # Master dictionary defining all known processes, their files, labels, and couplings.
+        # This makes the logic cleaner and easier to extend.
+        ALL_PROCESS_DEFINITIONS = {
+            'ann': {'file': 'Annihilation.pkl', 'label': r'Annihilation', 'coupling': 'gaee'},
+            'comp': {'file': 'Compton.pkl', 'label': r'Compton', 'coupling': 'gaee'},
+            'brem_el': {'file': 'Brem_el.pkl', 'label': r'Brem, Shower e-', 'coupling': 'gaee'},
+            'brem_pos': {'file': 'Brem_pos.pkl', 'label': r'Brem, Shower e+', 'coupling': 'gaee'},
+            #'primakoff_shower': {'file': 'Primakoff_shower.pkl', 'label': r'Primakoff, Shower', 'coupling': 'gayy'},
+            'primakoff_shower': {'file': 'Primakoff_shower.pkl', 'label': r'', 'coupling': 'gayy'},
+            'brem_primary': {'file': 'Brem_primary.pkl', 'label': r'Brem, Primary', 'coupling': 'gaee'},
+            'primakoff_primary': {'file': 'Primakoff_primary.pkl', 'label': r'Primakoff, Primary', 'coupling': 'gayy'},
         }
 
-        # --- 2. Create Plotting Recipes ---
-        plot_recipes = []
-        # Annihilation and Compton
-        if not plot_subprocesses:
-            plot_recipes.append({'label': r'Annihilation + Compton', 'keys': ['ann', 'comp'], 'rescale': gaee_factor or 1})
+         # --- 2. Build Plotting Recipes ---
+        # A "recipe" is a dictionary defining what keys to combine and what label to use.
+        recipes = []
+        if processes_to_plot:
+            # User wants specific processes. `plot_subprocesses` is ignored.
+            for key in processes_to_plot:
+                if key in ALL_PROCESS_DEFINITIONS:
+                    recipes.append({
+                        'keys': [key],
+                        'label': ALL_PROCESS_DEFINITIONS[key]['label']
+                    })
+                else:
+                    print(f"[Warning] Process key '{key}' not recognized. Skipping.")
         else:
-            plot_recipes.extend([
-                {'label': r'Annihilation', 'keys': ['ann'],  'rescale': gaee_factor or 1},
-                {'label': r'Compton', 'keys': ['comp'],  'rescale': gaee_factor or 1}
-            ])
+            # Default behavior: use standard groupings or split them if requested.
+            if not plot_subprocesses:
+                recipes = [
+                    {'keys': ['ann', 'comp'], 'label': r'Annihilation + Compton'},
+                    {'keys': ['brem_el', 'brem_pos'], 'label': r'Bremsstrahlung, Shower'}, # The requested label
+                    {'keys': ['primakoff_shower'], 'label': r'Primakoff, Shower'}
+                ]
+            else:
+                recipes = [
+                    {'keys': ['ann'], 'label': r'Annihilation'},
+                    {'keys': ['comp'], 'label': r'Compton'},
+                    {'keys': ['brem_el'], 'label': r'Brem, Shower e-'},
+                    {'keys': ['brem_pos'], 'label': r'Brem, Shower e+'},
+                    {'keys': ['primakoff_shower'], 'label': r'Primakoff, Shower'}
+                ]
 
-        # Bremsstrahlung from shower electrons/positrons
-        if not plot_subprocesses:
-            plot_recipes.append({'label': r'Bremsstrahlung, Shower', 'keys': ['brem_el', 'brem_pos'], 'rescale': gaee_factor or 1})
-        else:
-            plot_recipes.extend([
-                {'label': r'Brem, Shower e-', 'keys': ['brem_el'],  'rescale': gaee_factor or 1},
-                {'label': r'Brem, Shower e+', 'keys': ['brem_pos'], 'rescale': gaee_factor or 1}
-            ])
+            # Add the primary process recipe regardless of subprocess plotting
+            if self.primaries == 'electrons':
+                recipes.append({'keys': ['brem_primary'], 'label': r'Brem, Primary'})
+            elif self.primaries == 'photons':
+                recipes.append({'keys': ['primakoff_primary'], 'label': r'Primakoff, Primary'})
 
-        # Primakoff from shower photons
-        plot_recipes.append({'label': r'Primakoff, Shower', 'keys': ['primakoff_shower'], 'rescale': gayy_factor or 1})
-
-
-        # --- 2. Conditionally Add the Primary Beam Process ---
-        # This is the ONLY part that depends on the initial beam type.
-
-        if self.primaries == 'electrons':
-            plot_recipes.append({'label': r'Brem, Primary', 'keys': ['brem_primary'], 'rescale': gaee_factor or 1})
-        elif self.primaries == 'photons':
-            plot_recipes.append({'label': r'Primakoff, Primary', 'keys': ['primakoff_primary'], 'rescale': gayy_factor or 1})
-
-        # --- 3. Load Data and Prepare for Plotting ---
-        data_to_plot = []
-        for recipe in plot_recipes:
-            combined_axion_list = []
-            for key in recipe['keys']:
-                file_path = os.path.join(mass_dir_path, process_filename_map.get(key, ''))
+         # --- 3. Pre-scan Data to Determine Global Binning Range ---
+        print("Scanning data to determine optimal energy range for bins...")
+        all_energies = []
+        all_recipe_keys = [key for recipe in recipes for key in recipe['keys']]
+        for ma in masses:
+            mass_dir_path = os.path.join(self.DATA_folder_path, folder_name, str(ma))
+            if not os.path.isdir(mass_dir_path):
+                print(f"[Warning] Directory for mass '{ma}' not found. Skipping this mass.")
+                continue
+            for key in all_recipe_keys:
+                file_path = os.path.join(mass_dir_path, ALL_PROCESS_DEFINITIONS[key]['file'])
                 try:
                     with open(file_path, 'rb') as f:
-                        combined_axion_list.extend(pickle.load(f))
+                        data = pickle.load(f)
+                        all_energies.extend([d['p'][0] for d in data])
                 except FileNotFoundError:
-                    continue  # Silently ignore missing process files
+                    continue
 
-            if combined_axion_list:
-                data_to_plot.append({
-                    'recipe': recipe,
-                    'data': combined_axion_list
-                })
-
-        if not data_to_plot:
-            print(f"\n[Error] No finalized process files were found for mass ma={ma} in '{mass_dir_path}'.")
+        if not all_energies:
+            print("\n[Error] No data found for the specified masses and processes. Cannot create plot.")
             return
 
-        # --- 4. Binning and Plot Creation ---
-        all_E = [d['p'][0] for item in data_to_plot for d in item['data']]
-        E_min, E_max = min(all_E), max(all_E)
+        E_min, E_max = min(all_energies), max(all_energies)
         common_bins = np.logspace(np.log10(E_min), np.log10(E_max), int(np.ceil((np.log10(E_max) - np.log10(E_min)) * bins_per_decade)))
 
+        # --- 4. Create Plot and Iterate Through Masses and Recipes ---
         fig, ax = plt.subplots(1, 1)
         if weights_to_use is None:
             weights_to_use = ['w_prod_scaled', 'w_angle', 'w_LLP_gone', 'w_Ecut', 'w_prim']
 
-        for item in data_to_plot:
-            rescale_factor = item['recipe']['rescale']**2*(gayy_factor or 1)**2
-            E_values = [d['p'][0] for d in item['data']]
-            weights = [np.prod([d.get(wk, 1.0) for wk in weights_to_use])*rescale_factor for d in item['data']]
-            ax.hist(E_values, bins=common_bins, weights=weights, histtype='step', linewidth=2.0, label=item['recipe']['label'])
+        for ma in masses:
+            mass_dir_path = os.path.join(self.DATA_folder_path, folder_name, str(ma))
+            if not os.path.isdir(mass_dir_path): continue
+
+            for recipe in recipes:
+                combined_axion_list = []
+                for key in recipe['keys']:
+                    file_path = os.path.join(mass_dir_path, ALL_PROCESS_DEFINITIONS[key]['file'])
+                    try:
+                        with open(file_path, 'rb') as f:
+                            combined_axion_list.extend(pickle.load(f))
+                    except FileNotFoundError:
+                        continue
+
+                if not combined_axion_list: continue
+
+                # Determine plot label and rescaling factor
+                plot_label = recipe['label']
+                if len(masses) > 1:
+                    #plot_label += fr', $m_a={int(ma*1000)}$ MeV'
+                    plot_label += fr'$m_a={int(ma*1000)}$ MeV'
+
+                first_key = recipe['keys'][0]
+                coupling_type = ALL_PROCESS_DEFINITIONS[first_key]['coupling']
+                rescale_factor = 1.0
+                if coupling_type == 'gaee':
+                    rescale_factor = (gaee_factor or 1.0)**2
+                elif coupling_type == 'gayy':
+                    rescale_factor = (gayy_factor or 1.0)**2
+
+                E_values = [d['p'][0] for d in combined_axion_list]
+                weights = [np.prod([d.get(wk, 1.0) for wk in weights_to_use]) * rescale_factor for d in combined_axion_list]
+                ax.hist(E_values, bins=common_bins, weights=weights, histtype='step', linewidth=2.0, label=plot_label)
 
         # --- 5. Apply Final Formatting and Layout ---
         ax.set_xlabel(r'Energy $E$ [GeV]')
         ax.set_ylabel(r'Axions $\times f^4$ / POT $[{\rm GeV}^{4}]$')
-        ax.set_title(fr'Axion Flux for $m_a = {int(ma*1000)}$ MeV'+plot_title)
-        ax.set_xscale('log')
-        ax.set_yscale('log')
+
+        if len(masses) == 1:
+            ax.set_title(fr'Axion Flux for $m_a = {int(masses[0]*1000)}$ MeV' + plot_title)
+        else:
+            ax.set_title(r'Axion Flux Comparison' + plot_title)
+
+        if log_scale:
+            ax.set_xscale('log')
+            ax.set_yscale('log')
         if xlim: ax.set_xlim(xlim)
         if ylim: ax.set_ylim(ylim)
 
         ax.grid(which='major', linestyle='-', linewidth='0.5', color='gray', alpha=0.8)
-        #ax.grid(which='minor', linestyle='--', linewidth='0.5', color='gray', alpha=0.4)
-
-        # Get the handles (the colored lines) and labels created by ax.hist()
-        handles, labels = ax.get_legend_handles_labels()
-
-
-        # Create the legend with the combined lists
-        legend = ax.legend(handles, labels,
-                           title=legend_title_text, # This is the user-provided title
-                           handletextpad=0.5,
-                           #bbox_to_anchor=(1.04, 0.5), 
-                           loc='upper center', 
-                           ncol=2)
-                           #borderaxespad=0.)
-
+        legend = ax.legend(title=legend_title_text, loc='upper center', ncol=2)
         if legend_title_text:
-            plt.setp(legend.get_title(),multialignment='left')
+            plt.setp(legend.get_title(), multialignment='left')
         set_size(w, h, ax=ax)
-        
-        plot_folder_path = os.path.join(self.DATA_folder_path, folder_name)
-        
+
         if save_plot:
-           
+            plot_folder_path = os.path.join(self.DATA_folder_path, folder_name)
             final_save_path = os.path.join(plot_folder_path, plot_filename)
-            
             try:
                 fig.savefig(final_save_path, dpi=300, bbox_inches='tight')
                 print(f"✅ Plot successfully saved to: {final_save_path}")
             except Exception as e:
                 print(f"❌ Error saving plot: {e}")
-        
+
         plt.show()
+    
+#     def plot_histo_flux(self, ma, folder_name='PLOT', w=5, h=4, legend_title_text=None,
+#                     bins_per_decade=20, log_scale=True, weights_to_use=None,
+#                     gaee_factor=None, gayy_factor=None, xlim=None, ylim=None, plot_subprocesses=False, save_plot=True, plot_filename='Flux.png',plot_title=''):
+#         """
+#         Plots a publication-quality axion flux histogram from finalized data.
+
+#         This function uses a helper to set a precise figure size and applies styling
+#         to closely match professional examples. It correctly loads data from the
+#         `folder_name/<mass>/<ProcessName>.pkl` structure.
+
+#         Args:
+#             ma (float): The specific axion mass to plot.
+#             folder_name (str): The directory containing the finalized data.
+#             w, h (float): The target width and height of the axes area in inches.
+#             legend_title_text (str): Optional title for the plot legend.
+#             bins_per_decade (int, optional): Number of bins per decade of energy. Defaults to 20.
+#             log_scale (bool): Use logarithmic scale for the y-axis if True.
+#             weights_to_use (list of str): List of weight keys to multiply from the data.
+#             lim (tuple, optional): A tuple (xmin, xmax) to manually set the x-axis limits.
+#             ylim (tuple, optional): A tuple (ymin, ymax) to manually set the y-axis limits.
+#             plot_subprocesses (bool): If True, plots individual contributions (e.g., Annihilation,
+#                                       Compton) separately instead of combining them. Defaults to False.
+#         """
+#         # --- 1. Setup Paths, Plotting Style, and Process Mappings ---
+#         plt.rc('text', usetex=True)
+#         plt.rc('font', family='serif')
+
+#         mass_dir_path = os.path.join(self.DATA_folder_path, folder_name, str(ma))
+#         if not os.path.isdir(mass_dir_path):
+#             print(f"[Error] Directory for mass '{ma}' not found. Please run `finalize_data()`.")
+#             return
+
+#         process_filename_map = {
+#             'ann': 'Annihilation.pkl', 'comp': 'Compton.pkl', 'brem_el': 'Brem_el.pkl',
+#             'brem_pos': 'Brem_pos.pkl', 'primakoff_shower': 'Primakoff_shower.pkl',
+#             'brem_primary': 'Brem_primary.pkl', 'primakoff_primary': 'Primakoff_primary.pkl'
+#         }
+
+#         # --- 2. Create Plotting Recipes ---
+#         plot_recipes = []
+#         # Annihilation and Compton
+#         if not plot_subprocesses:
+#             plot_recipes.append({'label': r'Annihilation + Compton', 'keys': ['ann', 'comp'], 'rescale': gaee_factor or 1})
+#         else:
+#             plot_recipes.extend([
+#                 {'label': r'Annihilation', 'keys': ['ann'],  'rescale': gaee_factor or 1},
+#                 {'label': r'Compton', 'keys': ['comp'],  'rescale': gaee_factor or 1}
+#             ])
+
+#         # Bremsstrahlung from shower electrons/positrons
+#         if not plot_subprocesses:
+#             plot_recipes.append({'label': r'Bremsstrahlung, Shower', 'keys': ['brem_el', 'brem_pos'], 'rescale': gaee_factor or 1})
+#         else:
+#             plot_recipes.extend([
+#                 {'label': r'Brem, Shower e-', 'keys': ['brem_el'],  'rescale': gaee_factor or 1},
+#                 {'label': r'Brem, Shower e+', 'keys': ['brem_pos'], 'rescale': gaee_factor or 1}
+#             ])
+
+#         # Primakoff from shower photons
+#         plot_recipes.append({'label': r'Primakoff, Shower', 'keys': ['primakoff_shower'], 'rescale': gayy_factor or 1})
+
+
+#         # --- 2. Conditionally Add the Primary Beam Process ---
+#         # This is the ONLY part that depends on the initial beam type.
+
+#         if self.primaries == 'electrons':
+#             plot_recipes.append({'label': r'Brem, Primary', 'keys': ['brem_primary'], 'rescale': gaee_factor or 1})
+#         elif self.primaries == 'photons':
+#             plot_recipes.append({'label': r'Primakoff, Primary', 'keys': ['primakoff_primary'], 'rescale': gayy_factor or 1})
+
+#         # --- 3. Load Data and Prepare for Plotting ---
+#         data_to_plot = []
+#         for recipe in plot_recipes:
+#             combined_axion_list = []
+#             for key in recipe['keys']:
+#                 file_path = os.path.join(mass_dir_path, process_filename_map.get(key, ''))
+#                 try:
+#                     with open(file_path, 'rb') as f:
+#                         combined_axion_list.extend(pickle.load(f))
+#                 except FileNotFoundError:
+#                     continue  # Silently ignore missing process files
+
+#             if combined_axion_list:
+#                 data_to_plot.append({
+#                     'recipe': recipe,
+#                     'data': combined_axion_list
+#                 })
+
+#         if not data_to_plot:
+#             print(f"\n[Error] No finalized process files were found for mass ma={ma} in '{mass_dir_path}'.")
+#             return
+
+#         # --- 4. Binning and Plot Creation ---
+#         all_E = [d['p'][0] for item in data_to_plot for d in item['data']]
+#         E_min, E_max = min(all_E), max(all_E)
+#         common_bins = np.logspace(np.log10(E_min), np.log10(E_max), int(np.ceil((np.log10(E_max) - np.log10(E_min)) * bins_per_decade)))
+
+#         fig, ax = plt.subplots(1, 1)
+#         if weights_to_use is None:
+#             weights_to_use = ['w_prod_scaled', 'w_angle', 'w_LLP_gone', 'w_Ecut', 'w_prim']
+
+#         for item in data_to_plot:
+#             rescale_factor = item['recipe']['rescale']**2*(gayy_factor or 1)**2
+#             E_values = [d['p'][0] for d in item['data']]
+#             weights = [np.prod([d.get(wk, 1.0) for wk in weights_to_use])*rescale_factor for d in item['data']]
+#             ax.hist(E_values, bins=common_bins, weights=weights, histtype='step', linewidth=2.0, label=item['recipe']['label'])
+
+#         # --- 5. Apply Final Formatting and Layout ---
+#         ax.set_xlabel(r'Energy $E$ [GeV]')
+#         ax.set_ylabel(r'Axions $\times f^4$ / POT $[{\rm GeV}^{4}]$')
+#         ax.set_title(fr'Axion Flux for $m_a = {int(ma*1000)}$ MeV'+plot_title)
+#         ax.set_xscale('log')
+#         ax.set_yscale('log')
+#         if xlim: ax.set_xlim(xlim)
+#         if ylim: ax.set_ylim(ylim)
+
+#         ax.grid(which='major', linestyle='-', linewidth='0.5', color='gray', alpha=0.8)
+#         #ax.grid(which='minor', linestyle='--', linewidth='0.5', color='gray', alpha=0.4)
+
+#         # Get the handles (the colored lines) and labels created by ax.hist()
+#         handles, labels = ax.get_legend_handles_labels()
+
+
+#         # Create the legend with the combined lists
+#         legend = ax.legend(handles, labels,
+#                            title=legend_title_text, # This is the user-provided title
+#                            handletextpad=0.5,
+#                            #bbox_to_anchor=(1.04, 0.5), 
+#                            loc='upper center', 
+#                            ncol=2)
+#                            #borderaxespad=0.)
+
+#         if legend_title_text:
+#             plt.setp(legend.get_title(),multialignment='left')
+#         set_size(w, h, ax=ax)
+        
+#         plot_folder_path = os.path.join(self.DATA_folder_path, folder_name)
+        
+#         if save_plot:
+           
+#             final_save_path = os.path.join(plot_folder_path, plot_filename)
+            
+#             try:
+#                 fig.savefig(final_save_path, dpi=300, bbox_inches='tight')
+#                 print(f"✅ Plot successfully saved to: {final_save_path}")
+#             except Exception as e:
+#                 print(f"❌ Error saving plot: {e}")
+        
+#         plt.show()
         
     def compute_and_save_sensitivities(self, masses=None, folder_name='PLOT', sens_folder_name='Sens', compute_combined=True, compute_separate=True):
         """
