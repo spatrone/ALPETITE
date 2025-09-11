@@ -161,11 +161,13 @@ def decay_weight(w_LLP_gone, gayy, l0, Lpipe):
 
 
 def axions_exp_weights(axions, params, is_electron_based):
-    angle_accept, Lpipe, Ecut, gayy_coeff, gaee_coeff = params['angle_accept'], params['Lpipe'], params['Ecut'], params['gayy_coeff'], params['gaee_coeff']
+    angle_accept, Lpipe, Ecut, gayy_coeff, gaee_coeff, inelastic_on, Z, A = params['angle_accept'], params['Lpipe'], params['Ecut'], params['gayy_coeff'], params['gaee_coeff'], params['inelastic_on'], params['Z_T'], params['A_T']
     for axion in axions:
         axion_p = axion['p'][-3:]
         omega = axion['p'][0]
         ma=axion['m_a']
+        if not is_electron_based: Q2=axion['Q2']
+        
         # Angle weight
         if np.arccos(axion_p[2] / np.sqrt(axion_p @ axion_p)) < angle_accept:
             angle_weight = 1
@@ -194,15 +196,18 @@ def axions_exp_weights(axions, params, is_electron_based):
         axion['w_LLP_gaee_one'] = decay_weight_LLP_electrons
         axion['w_LLP_gone'] = decay_weight_LLP
         
-        #Old prescription: only diphoton decay
-        #axion['w_LLP_gone'] = decay_weight_LLP_gammas
         axion['w_Ecut'] = w_energycut
         
-        #scaling w_prod by coefficient of the coupling
+        #scaling w_prod by coefficient of the couplings + inelastic on/off
         if is_electron_based:
             axion['w_prod_scaled'] = axion['w_prod'] * gaee_coeff ** 2
         else:
-            axion['w_prod_scaled'] = axion['w_prod'] * gayy_coeff ** 2
+            if inelastic_on:
+                coeff=1
+            else:
+                coeff= G2tot(Q2, Z, A, False)/G2tot(Q2, Z, A, True)
+                
+            axion['w_prod_scaled'] = axion['w_prod'] * gayy_coeff ** 2 * coeff
         
     return axions
 
@@ -351,7 +356,10 @@ def photons_from_beam(pbeam, shower, plothisto=False):
         shower_particles = shower.generate_shower(primary_particle)
         
         # --- The Translation Step ---
-        for p in shower_particles:
+        for j, p in enumerate(shower_particles):
+            #skip the primary photon
+            if j==0:
+                continue
             if p.get_pid() == 22 and p.get_p0()[0] > omega_min:
                 # Create the custom dictionary for each valid photon
                 photon_dict = {
@@ -367,7 +375,7 @@ def photons_from_beam(pbeam, shower, plothisto=False):
         elapsed_time = time.time() - start_time
         avg_time_per_shower = elapsed_time / (i + 1)
         eta = avg_time_per_shower * (N_primaries - (i + 1))
-        progress = f"Generated {i+1}/{N_primaries} showers ({n_total_photons} photons > {omega_min} GeV) | ETA: {eta:.2f}s"
+        progress = f"Generated {i+1}/{N_primaries} showers ({n_total_photons} shower photons > {omega_min} GeV) | ETA: {eta:.2f}s"
         sys.stdout.write(f'\r{progress}\033[K')
         sys.stdout.flush()
     print()
@@ -554,10 +562,12 @@ def vectors_from_beam(part_beam, dark_shower):
                 if gen_number==1:
                     if parent_pid==11 and w!=0: 
                         vector_from_el_prim.append(DarkVector)
-                if parent_pid==11 and w!=0: 
-                    vector_from_el.append(DarkVector)
-                if parent_pid==-11 and w!=0: 
-                    vector_from_pos.append(DarkVector)
+                        #print('FOUND A PRIMARY ELECTRON!')
+                else:
+                    if parent_pid==11 and w!=0: 
+                        vector_from_el.append(DarkVector)
+                    if parent_pid==-11 and w!=0: 
+                        vector_from_pos.append(DarkVector)
 
             elif genprocess in ["DarkComp_bound", "DarkComp"]:
                 if w == 0:
@@ -1000,22 +1010,24 @@ def find_bracket_endpoint_log(func, log_start, step, max_steps=30):
             return log_current  # Found a valid endpoint
     return None # Failed to find a bracket
 
-def sensitivity_exact_fast(axions, params, tolerance=1e-7):
+def sensitivity_exact_fast(axions, params, tolerance=1e-7, plot=False):
     """
     The definitive robust solver. It operates in log-space and uses an active
     search to guarantee valid brackets for brentq.
     """
-    # --- Step 1 & 2: Setup and Vectorization (Same as before) ---
-    N_gamma, N_discovery, l0, Lpipe = params['POT'], params['N_discovery'], params['l0'], params['Lpipe']
+    # --- Step 1 & 2: Setup and Vectorization ---
+    N_gamma, N_discovery, l0, Lpipe, Z, A = params['POT'], params['N_discovery'], params['l0'], params['Lpipe'], params['Z_T'], params['A_T']
     R = N_discovery / N_gamma
     log_R = np.log10(R)
 
+    
+    mass_a=axions[0]['m_a']
     w_prim = np.array([ax['w_prim'] for ax in axions])
     w_Ecut = np.array([ax['w_Ecut'] for ax in axions])
     w_angle = np.array([ax['w_angle'] for ax in axions])
     w_prod = np.array([ax['w_prod_scaled'] for ax in axions])
     w_LLP_gone = np.array([ax['w_LLP_gone'] for ax in axions])
-
+    
     # --- Step 3: Define the Log-Space Function ---
     def f_log_space(log_gayy):
         gayy = np.power(10.0, log_gayy)
@@ -1027,37 +1039,156 @@ def sensitivity_exact_fast(axions, params, tolerance=1e-7):
     # --- Step 4: Find the Peak  ---
     res_peak = minimize_scalar(lambda log_g: -f_log_space(log_g), bracket=(-12, 2), method='brent')
     log_g_peak = res_peak.x
-    if f_log_space(log_g_peak) < 0: # Check if peak is high enough
-        return [None, None], [None, None]
+    peak_value = f_log_space(log_g_peak)
 
-    # --- Step 5: Get Guesses  ---
-    g_left_guess = gayy_LLP_approx(axions, params)
-    g_right_guess = gayy_approx_right(axions, params)
 
-    # --- Step 6: Find Roots with a ROBUST BRACKET SEARCH ---
+    # --- Step 5: Find Roots with a ROBUST BRACKET SEARCH ---
     log_g_left, log_g_right = None, None
+    g_left_guess,g_right_guess=None, None
 
-    # Find Left Root
-    if g_left_guess is not None:
-        # Search LEFT from the peak to find a point where f is negative
-        b_left = find_bracket_endpoint_log(f_log_space, log_g_peak, step=-0.5)
-        if b_left is not None:
-            try: # The bracket is now guaranteed to be valid
-                log_g_left = brentq(f_log_space, a=b_left, b=log_g_peak, xtol=tolerance)
-            except ValueError: pass # Should never happen now
+    if peak_value >= 0:  # Only search for roots if peak is above zero
+        # Find Left Root
+        # --- Get Guesses  ---
+        g_left_guess = gayy_LLP_approx(axions, params)
+        g_right_guess = gayy_approx_right(axions, params)
+        
+        if g_left_guess is not None:
+            # Search LEFT from the peak to find a point where f is negative
+            b_left = find_bracket_endpoint_log(f_log_space, log_g_peak, step=-0.5)
+            if b_left is not None:
+                try: # The bracket is now guaranteed to be valid
+                    log_g_left = brentq(f_log_space, a=b_left, b=log_g_peak, xtol=tolerance)
+                except ValueError: pass # Should never happen now
 
-    # Find Right Root
-    if g_right_guess is not None:
-        # Search RIGHT from the peak to find a point where f is negative
-        b_right = find_bracket_endpoint_log(f_log_space, log_g_peak, step=+0.5)
-        if b_right is not None:
-            try: # The bracket is now guaranteed to be valid
-                log_g_right = brentq(f_log_space, a=log_g_peak, b=b_right, xtol=tolerance)
-            except ValueError: pass # Should never happen now
+        # Find Right Root
+        if g_right_guess is not None:
+            # Search RIGHT from the peak to find a point where f is negative
+            b_right = find_bracket_endpoint_log(f_log_space, log_g_peak, step=+0.5)
+            if b_right is not None:
+                try: # The bracket is now guaranteed to be valid
+                    log_g_right = brentq(f_log_space, a=log_g_peak, b=b_right, xtol=tolerance)
+                except ValueError: pass # Should never happen now
             
     # --- Step 7: Final Conversion ---
     left_bound = np.power(10.0, log_g_left) if log_g_left is not None else None
     right_bound = np.power(10.0, log_g_right) if log_g_right is not None else None
+    
+    # --- Step 8: Plot if requested ---
+    if plot:
+        # Print mass and bounds information
+        print(f"\nMass m_a = {mass_a:.3e} GeV")
+        if peak_value < 0:
+            print(f"No sensitivity: Peak value ({peak_value:.3f}) is below zero")
+        else:
+            print(f"Left bound: g_aγγ = {left_bound:.3e}" if left_bound else "Left bound: None")
+            print(f"Right bound: g_aγγ = {right_bound:.3e}" if right_bound else "Right bound: None")
+        print(f"Peak at log10(g_aγγ) = {log_g_peak:.3f} (g_aγγ = {10**log_g_peak:.3e}), peak value = {peak_value:.3f}")
+        
+        # Determine plot range
+        plot_points = [log_g_peak]
+        
+        # For cases with no zeros, use a wider window
+        if log_g_left is None and log_g_right is None:
+            # No zeros found - show a wider range around the peak
+            margin = 3.0
+            log_g_min = log_g_peak - margin
+            log_g_max = log_g_peak + margin
+        else:
+            # At least one zero found
+            if log_g_left is not None:
+                plot_points.append(log_g_left)
+            if log_g_right is not None:
+                plot_points.append(log_g_right)
+            
+            margin = 1.5
+            log_g_min = min(plot_points) - margin
+            log_g_max = max(plot_points) + margin
+        
+        # Create range for plotting
+        log_g_range = np.linspace(log_g_min, log_g_max, 1000)
+        f_values = [f_log_space(log_g) for log_g in log_g_range]
+        
+        # Clip f_values for better visualization
+        f_values_clipped = np.clip(f_values, -5, None)
+        
+        plt.figure(figsize=(7, 4))
+        plt.plot(log_g_range, f_values_clipped, 'b-', linewidth=2, label='$f(\\log_{10}(g_{a\\gamma\\gamma}))$')
+        
+        # Mark where function is clipped
+        clipped_indices = np.where(np.array(f_values) < -5)[0]
+        if len(clipped_indices) > 0:
+            # Find continuous regions that are clipped
+            clipped_regions = []
+            start_idx = clipped_indices[0]
+            for i in range(1, len(clipped_indices)):
+                if clipped_indices[i] != clipped_indices[i-1] + 1:
+                    clipped_regions.append((start_idx, clipped_indices[i-1]))
+                    start_idx = clipped_indices[i]
+            clipped_regions.append((start_idx, clipped_indices[-1]))
+            
+            # Shade clipped regions
+            for start, end in clipped_regions:
+                plt.axvspan(log_g_range[start], log_g_range[end], alpha=0.1, color='red', zorder=-1)
+            plt.plot([], [], 'r-', alpha=0.3, linewidth=10, label='Clipped region (f < -5)')
+        
+        plt.axhline(y=0, color='k', linestyle='--', alpha=0.5, label='$y = 0$')
+        plt.axhline(y=-5, color='r', linestyle=':', alpha=0.3, label='$y = -5$ (clip limit)')
+        
+        # Plot the peak
+        peak_color = 'go' if peak_value >= 0 else 'ro'
+        peak_value_plot = max(peak_value, -5)  # Clip peak value for plotting
+        plt.plot(log_g_peak, peak_value_plot, peak_color, markersize=10, 
+                label=f'Peak: $g_{{a\\gamma\\gamma}} = {10**log_g_peak:.2e}$, f = {peak_value:.3f}')
+        
+        # Plot the roots (zeros) if they exist
+        if log_g_left is not None:
+            plt.plot(log_g_left, 0, 'ro', markersize=10, 
+                    label=f'Left zero: $g_{{a\\gamma\\gamma}} = {left_bound:.2e}$')
+        if log_g_right is not None:
+            plt.plot(log_g_right, 0, 'ro', markersize=10, 
+                    label=f'Right zero: $g_{{a\\gamma\\gamma}} = {right_bound:.2e}$')
+        
+        # Shade the sensitivity region if both zeros exist
+        if log_g_left is not None and log_g_right is not None:
+            plt.axvspan(log_g_left, log_g_right, alpha=0.2, color='green', 
+                       label='Sensitivity region')
+        elif peak_value < 0:
+            # Add text to explain no sensitivity
+            plt.text(0.5, 0.7, 'NO SENSITIVITY\n(function never crosses zero)', 
+                    transform=plt.gca().transAxes,
+                    horizontalalignment='center', verticalalignment='center',
+                    fontsize=16, color='red', weight='bold',
+                    bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.5))
+        
+        plt.xlabel('$\\log_{10}(g_{a\\gamma\\gamma})$', fontsize=12)
+        plt.ylabel('$\\log_{10}(W) - \\log_{10}(R)$', fontsize=12)
+        
+        # Update title based on whether zeros were found
+        if log_g_left is None and log_g_right is None:
+            title_suffix = " (No Sensitivity)" if peak_value < 0 else " (No zeros found)"
+        else:
+            title_suffix = ""
+        
+        plt.title(f'Sensitivity Function for $m_a = {mass_a:.2e}$ GeV{title_suffix}\n' + 
+                  f'Solving: $\\log_{{10}}(W) - \\log_{{10}}(N_{{discovery}}/N_{{\\gamma}}) = 0$', fontsize=14)
+        plt.grid(True, alpha=0.3)
+        plt.legend(fontsize=10, loc='best')
+        
+        # Add text box with equation details
+        equation_text = f'$m_a = {mass_a:.2e}$ GeV\n$R = N_{{discovery}}/N_{{\\gamma}} = {R:.2e}$\n$\\log_{{10}}(R) = {log_R:.3f}$'
+        if peak_value < 0:
+            equation_text += f'\nPeak value: {peak_value:.3f}'
+        plt.text(0.02, 0.98, equation_text, transform=plt.gca().transAxes,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        
+        # Set y-axis limits with clipping at -5
+        y_max = max(max(f_values_clipped), 0.5)
+        plt.ylim(-5.5, y_max + 0.5)
+        
+        plt.tight_layout()
+        plt.show()
+
+
 
     return [left_bound, right_bound], [g_left_guess, g_right_guess]
 
@@ -1080,7 +1211,9 @@ class AxionShower:
             'Ecut': 0.200,
             'POT': 6e20,
             'shower_material': 'molybdenum',
-            'primaries': 'photons'
+            'primaries': 'photons',
+            'inelastic_on': True,
+            'shower_cutoff':0.05
         },
         'BDX': {
             'Lpipe': 3.0,
@@ -1089,7 +1222,9 @@ class AxionShower:
             'Ecut': 0.300,     
             'POT': 1e22,
             'shower_material': 'aluminum',
-            'primaries': 'electrons'
+            'primaries': 'electrons',
+            'inelastic_on': True,
+            'shower_cutoff':0.05
         }
         # Add other experiments here in the future
     }
@@ -1097,32 +1232,31 @@ class AxionShower:
     def __init__(self, DATA_folder, shower_material=None, experiment=None, primaries=None, petite_home_dir=PETITE_home_dir, dictionary_dir=dictionary_dir, **kwargs):
         """
         Initializes the AxionShower simulation environment.
-
         Args:
-            DATA_folder (str): The directory to store data, relative to petite_home_dir.
-            shower_material (str, optional): The material for the shower. If None, the
-                default for the selected experiment will be used. This serves as an override.
-            experiment (str, optional): The name of the experiment ('SHIP', 'BDX').
-                Defaults to 'SHIP'. This sets the base configuration.
-            petite_home_dir (str, optional): Path to the PETITE project home.
-            dictionary_dir (str, optional): Path to the dictionary directory.
-            **kwargs: Other specific parameter overrides (e.g., POT=1e22, Lpipe=100).
+        DATA_folder (str): The directory to store data, relative to petite_home_dir.
+        shower_material (str, optional): The material for the shower. If None, the
+            default for the selected experiment will be used. This serves as an override.
+        experiment (str, optional): The name of the experiment ('SHIP', 'BDX').
+            Defaults to 'SHIP'. This sets the base configuration.
+        petite_home_dir (str, optional): Path to the PETITE project home.
+        dictionary_dir (str, optional): Path to the dictionary directory.
+        **kwargs: Other specific parameter overrides (e.g., POT=1e22, Lpipe=100).
         """
         self.PETITE_home = petite_home_dir
         self.dict_dir = dictionary_dir
         self.DATA_folder_path = os.path.join(petite_home_dir, DATA_folder)
-        
+
         self.experiment = experiment or 'SHIP'
         if self.experiment not in self.EXPERIMENT_DEFAULTS:
             raise ValueError(f"Experiment '{self.experiment}' is not defined. Available options are: {list(self.EXPERIMENT_DEFAULTS.keys())}")
-        
-        # --- Add shower_material to kwargs if provided ---
+
+        # --- Inject key arguments into kwargs for unified processing ---
         if shower_material is not None:
             kwargs['shower_material'] = shower_material
         if primaries is not None:
             kwargs['primaries'] = primaries
-        
-        # Smart State Initialization
+
+        # --- State Initialization ---
         self.logger = Logger(self.DATA_folder_path)
         existing_state = self.logger._load_log_state()
 
@@ -1131,103 +1265,173 @@ class AxionShower:
             self.params_dict = existing_state
         else:
             print(f"[State] No existing state found. Initializing new state for '{self.experiment}' experiment.")
+            # Start with an empty dict, _update_params_dict will build it from defaults
             self.params_dict = {}
-            self._update_params_dict(**kwargs)
-            
+
+        # --- Apply Overrides ---
+        # kwargs will override both a loaded state AND the initial defaults.
+        # We pass print_updates=False here because we'll do a final printout at the end.
+        if kwargs:
+            print("[State] Applying explicit overrides from constructor...")
+        self._update_params_dict(print_updates=False, **kwargs)
+
         self.shower_material = self.params_dict.get('shower_material')
         self.primaries = self.params_dict.get('primaries')
-        
-        print(self.primaries)
-        
+
         print("\n--- Initialized AxionShower State ---")
-        # Use json.dumps for pretty printing the dictionary
         print(json.dumps(self.params_dict, indent=4))
         print("-------------------------------------\n")
-    
     ##############
     #UTILITIES
     ##############
     
+    def reset_parameters(self, print_updates=True):
+        """
+        Resets all parameters to the original defaults for the selected experiment
+        and logs this action.
+        """
+        print(f"\n--> Resetting all parameters to defaults for '{self.experiment}' experiment...")
+        
+        # Clear the existing dictionary to ensure a true reset
+        self.params_dict = {}
+        
+        # The update method handles printing and logging automatically.
+        self._update_params_dict(print_updates=print_updates, log_this_change=True)
+        
+        print("--> Reset complete.")
+
+    
     def _set_primaries(self, name, print_updates=False):
         """
-        Convenience method to update the primary particle type.
-        This correctly updates the central parameter dictionary.
+        Convenience method to update the primary particle type and log the change.
         """
         print(f"--> Setting primary particle type to '{name}'...")
-        self._update_params_dict(primaries=name, print_updates=print_updates)
+        # Added log_this_change=True for traceability
+        self._update_params_dict(primaries=name, print_updates=print_updates, log_this_change=True)
+    
     
     def _update_dict_dir(self,new_dict_dir):
         self.dict_dir = new_dict_dir
     
-    def _update_params_dict(self, primaries=None, shower_material=None, gayy_coeff=None, gaee_coeff=None, Lpipe=None, l0=None, A_detector=None, Ecut=None, POT=None, Ndiscovery=None, shower_cutoff=None, inelastic_on=None, print_updates=False):
+    def _update_params_dict(self, 
+                        # --- User-Settable Primary Parameters ---
+                        primaries=None, shower_material=None, 
+                        Lpipe=None, l0=None, A_detector=None, Ecut=None, POT=None, 
+                        shower_cutoff=None, inelastic_on=None, 
+                        # --- Control Flags (keyword-only) ---
+                        *, 
+                        print_updates=False, 
+                        log_this_change=False):
         """
-        Updates the internal parameter dictionary based on experiment defaults and explicit overrides.
-        """
-        # 1. Start with the defaults for the chosen experiment
-        base_params = self.EXPERIMENT_DEFAULTS[self.experiment].copy()
+        Updates the internal parameter dictionary and, if requested, logs the change.
 
-        # 2. Collect all explicit overrides from the function arguments.
+        This is the sole gateway for modifying the object's state (`self.params_dict`).
+        It follows a clear, robust procedure:
+        1.  Starts with the current state.
+        2.  Applies any explicit parameter overrides provided as arguments.
+        3.  Re-calculates all derived physical properties (density, acceptance, etc.).
+        4.  Compares the final proposed state with the old state to find changes.
+        5.  Prints a summary of changes if requested.
+        6.  Updates the object's state.
+        7.  Logs the event to the central log file if requested.
+
+        Args:
+            primaries (str, optional): The primary beam particle type.
+            shower_material (str, optional): The material for the shower.
+            ... (and all other physical parameters) ...
+            *
+            print_updates (bool, optional): If True, prints a detailed summary
+                of all parameters that were changed. Defaults to False.
+            log_this_change (bool, optional): If True, the change will be
+                permanently recorded in the log file. Defaults to False.
+
+        Returns:
+            dict: A dictionary containing the details of what was changed.
+        """
+        # === Step 1: Prepare the Target Parameter Set ===
+
+        # Start with a copy of the current state to ensure we're "updating".
+        target_params = self.params_dict.copy()
+
+        # Collect all explicit overrides from the function arguments.
         overrides = {
             k: v for k, v in locals().items() 
-            if v is not None and k not in ['self', 'print_updates', 'base_params']
+            if v is not None and k in [
+                'primaries', 'shower_material',
+                'Lpipe', 'l0', 'A_detector', 'Ecut', 'POT',
+                'shower_cutoff', 'inelastic_on'
+            ]
         }
+
+        # Apply the overrides to our target state.
+        target_params.update(overrides)
+
+        # Ensure essential defaults from the experiment's base config are present.
+        # This is crucial for the very first initialization.
+        base_defaults = self.EXPERIMENT_DEFAULTS[self.experiment]
+        for key, value in base_defaults.items():
+            target_params.setdefault(key, value)
         
-        # 3. Merge overrides into the base parameters
-        final_params = base_params
-        final_params.update(overrides)
+        # === Step 2: Calculate Derived Physical Properties ===
 
-        # 4. Set defaults for non-experimental parameters if they weren't provided
-        final_params.setdefault('gayy_coeff', alpha_em/np.pi)
-        final_params.setdefault('gaee_coeff', 2*m_electron/np.sqrt(4*np.pi*alpha_em))
-        final_params.setdefault('shower_cutoff', 0.05)
-        final_params.setdefault('inelastic_on', True)
-        final_params.setdefault('N_discovery', 5)
-
-        # --- Use the finalized material to initialize Shower and get properties ---
-        # This must be done *after* the final material has been determined.
-        current_material = final_params['shower_material']
+        # Use the finalized material to initialize Shower and get its properties.
+        current_material = target_params['shower_material']
         s = Shower(self.PETITE_home + self.dict_dir, current_material, 1)
         (Z, A, rho, _) = s.get_material_properties()
-        ndensity = rho / A * 6.022e23
-        angle_accept = np.sqrt(final_params['A_detector']) / (2 * (final_params['Lpipe'] + final_params['l0']))
-        
-        # Build the dictionary of all parameters for the final update
-        new_params = {
+
+        # Calculate all other derived values based on the target parameters.
+        derived_properties = {
             'rho': rho,
-            'ndensity': ndensity,
-            'angle_accept': angle_accept,
+            'ndensity': rho / A * 6.022e23,
+            'angle_accept': np.sqrt(target_params['A_detector']) / (2 * (target_params['Lpipe'] + target_params['l0'])),
             'me': m_electron,
             'alpha_em': alpha_em,
             'mT': A,
             "Z_T": Z,
             "A_T": A,
         }
-        new_params.update(final_params)
 
-        # Printing changes & Updating dict
+        # Combine the primary parameters and derived properties into the final state.
+        final_params = target_params.copy()
+        final_params.update(derived_properties)
+
+        # === Step 3: Detect and Report Changes ===
+
         changes_dict = {}
-        for key in new_params:
+        for key in sorted(final_params.keys()):
             old_value = self.params_dict.get(key, None)
-            new_value = new_params[key]
+            new_value = final_params[key]
             if old_value != new_value:
                 changes_dict[key] = (old_value, new_value)
 
-        if print_updates:
-            print("\nParameter Update Summary:")
-            if not changes_dict:
-                print("No changes detected.")
-            else:
-                print(f"{'Parameter':<17} {'Old Value':<15} {'New Value':<15}")
-                print("="*47)
-                for key, (old_val, new_val) in changes_dict.items():
-                    old_str = f"{old_val:.4g}" if isinstance(old_val, float) else "None" if old_val is None else str(old_val)
-                    new_str = f"{new_val:.4g}" if isinstance(new_val, float) else str(new_val)
-                    print(f"{key:<17} {old_str:<15} {new_str:<15}")
-            print("-" * 47)
+        if print_updates and changes_dict:
+            print("\n--- Parameter Update Summary ---")
+            print(f"{'Parameter':<17} {'Old Value':<15} {'New Value':<15}")
+            print("="*49)
+            for key, (old_val, new_val) in changes_dict.items():
+                old_str = f"{old_val:.4g}" if isinstance(old_val, float) else "None" if old_val is None else str(old_val)
+                new_str = f"{new_val:.4g}" if isinstance(new_val, float) else str(new_val)
+                print(f"{key:<17} {old_str:<15} {new_str:<15}")
+            print("-" * 49)
 
-        self.params_dict.update(new_params)
+        # === Step 4: Update Object State and Log ===
+
+        # Atomically update the internal dictionary.
+        self.params_dict = final_params
+
+        # Update convenience attributes.
         self.shower_material = self.params_dict['shower_material']
-        
+        self.primaries = self.params_dict.get('primaries')
+
+        # Centralized logging logic.
+        if log_this_change and changes_dict:
+            # A "reset" is a call with no specific parameter overrides.
+            is_reset_call = not overrides
+            event_name = "Parameter Reset" if is_reset_call else "Parameter Update"
+
+            # Delegate logging to the Logger class.
+            self.logger.log_state_change(self, changes_dict, event_name=event_name)
+
         return changes_dict
         
     @staticmethod
@@ -1699,6 +1903,50 @@ class AxionShower:
 
         return True
     
+    
+    
+    
+    def gen_epa_primakoff_axions(self, masses, out_epa_dir, run_id):
+        """
+        Generates Primakoff axions from an electron beam via the Equivalent Photon
+        Approximation (EPA). This is an electron-beam-only primary channel.
+        """
+        print("\n> Generating EPA Primakoff Axions (from Electron Beam)...")
+        if self.primaries != 'electrons':
+            print("  Skipping: Primary beam is not electrons.")
+            return False
+
+        os.makedirs(out_epa_dir, exist_ok=True)
+
+        self.epa_converter = EPASampler() # Instantiate your sampler
+
+        for index, ma in enumerate(masses):
+            print(f"\n> Initiating EPA conversion for ma={ma}.")
+            s = Shower(self.PETITE_home + self.dict_dir, self.shower_material, ma)
+
+            # 1. Get equivalent photons from the primary electron beam
+            epa_photon_dicts = self.epa_converter.gen_photons_from_beam(self.beam)
+
+            if not epa_photon_dicts:
+                print(f"  No equivalent photons generated for ma={ma}. Skipping.")
+                continue
+
+            # 2. Convert these photons to axions using the existing Primakoff function
+            a_epa, s_epa = convert_phot_to_axions_primakoff(s, epa_photon_dicts, ma, self.params_dict, return_stats=True)
+
+            # 3. Save the axions to their own unique batch file
+            self._save_single_mass(out_epa_dir, ma, a_epa, run_id, prefix='ax')
+
+            print(f"\nEPA Primakoff Axion Conversion Summary — ma = {ma} GeV - batch no {run_id}")
+            print("=" * 85)
+            print(f"{'Source':<15}  {'Converted':>12} {'Invalid weight':>20}")
+            print("-" * 85)
+            if s_epa:
+                print(f"{'EPA Photons':<15}  {s_epa['converted']:>12} "
+                      f"{s_epa.get('inv_prod_weight', 0):>20}")
+            print("=" * 85 + "\n")
+
+        return True
 
     ##############
     #RUN METHODS
@@ -1821,9 +2069,6 @@ class AxionShower:
                     f"You have also included other active processes: {other_processes}. "
                     f"Please either remove the primary_only flag or set active_processes=['Primakoff']."
                 )
-            # This check for photon beam must still exist, but can be simplified
-            if self.primaries != 'photons':
-                raise ValueError("The 'primary_only=True' flag can only be used with a photon primary beam.")
 
         # =========================================================================
         # --- 2. Define Paths and the Process-to-Directory Map ---
@@ -1835,14 +2080,17 @@ class AxionShower:
         primakoff_out_dir = os.path.join(folder_path, 'primakoff_axs'); primakoff_photons_dir = os.path.join(folder_path, 'primakoff_phot')
 
         brem_axion_prim_dir, primakoff_axion_prim_dir = None, None
-        if self.primaries == 'electrons': brem_axion_prim_dir = os.path.join(folder_path, 'brem_prim_axs')
+        primakoff_epa_axion_dir = None
+        if self.primaries == 'electrons': 
+            brem_axion_prim_dir = os.path.join(folder_path, 'brem_prim_axs')
+            primakoff_epa_axion_dir = os.path.join(folder_path, 'primakoff_epa_axs')
         if self.primaries == 'photons': primakoff_axion_prim_dir = os.path.join(folder_path, 'primakoff_prim_axs')
 
         process_to_dirs = {
             'Vectors':   ([all_vec_dir], ['vec']),
             'Ann+Comp':  ([ann_axion_dir, comp_axion_dir], ['ax']),
             'Brem':      ([brem_axion_el_dir, brem_axion_pos_dir, brem_axion_prim_dir], ['ax']),
-            'Primakoff': ([primakoff_out_dir, primakoff_photons_dir], ['ax', 'phot']),
+            'Primakoff': ([primakoff_out_dir, primakoff_photons_dir,primakoff_epa_axion_dir], ['ax', 'phot']),
             'PrimaryPrimakoff': ([primakoff_axion_prim_dir], ['ax'])
         }
 
@@ -1927,171 +2175,100 @@ class AxionShower:
                      print(f"  > Final Primary Primakoff data found. Skipping.")
                 else:
                     self.gen_primary_primakoff_axions(mass_list, primakoff_axion_prim_dir, run_id)
+                    
+            # --- D) EPA Primakoff Process (Electron Beam) ---       
+            if 'Primakoff' in active_processes and self.primaries == 'electrons':
+                dirs, prefix = process_to_dirs['Primakoff']
+                # We check specifically against the EPA directory `primakoff_epa_axion_dir`
+                if mode == 'run' and self._data_exists_for_mass(ma, [primakoff_epa_axion_dir], prefix[0]):
+                    print(f"  > Final EPA Primakoff data found. Skipping.")
+                else:
+                    self.gen_epa_primakoff_axions(mass_list, primakoff_epa_axion_dir, run_id)
 
         # =========================================================================
         # --- 5. Finalization ---
         # =========================================================================
         run_args = {'run_ID': run_id, 'N_primaries': len(beam), 'masses': masses, 'mode': mode, 'clean': clean, 'active_processes': active_processes}
-        self.logger.log_run(self, run_args)
+        self.logger.log_simulation_run(self, run_args)
         self.logger._save_log_state(self.params_dict) # Save current physics/experiment parameters
 
         print("\n####################\nAll generation processes completed.\n####################")
         
-                    
-    
-    def run_exp_weights(self, Lpipe=None, l0=None, A_detector=None, Ecut=None, POT=None, gayy_coeff= None, gaee_coeff = None, inelastic_on = None):
+    def finalize_and_weight_data(
+        self,
+        folder_name='PLOT_FINAL',
+        overwrite: bool = True,
+        run_ids_to_include=None,
+        *,
+        # --- Mandatory Physics Parameters ---
+        gaee_coeff,
+        gayy_coeff,
+        # --- Optional Overrides ---
+        **optional_exp_params
+    ):
         """
-        Enforces a set of experimental weights across all existing axion data batches.
+        Collects raw data, applies experimental weights on-the-fly, and finalizes
+        it into a per-mass directory structure.
 
-        This method is fully automatic and robust against interruption. It scans
-        all axion data directories, finds every data batch, and ensures its
-        weights are consistent with the parameters provided to this function.
-        If the script is interrupted, it can be safely re-run to complete the job.
+        This method requires the user to be explicit about the key physics parameters
+        that define the final event counts and discovery potential.
 
         Args:
-            Lpipe (float): The desired length of the decay pipe.
-            l0 (float): The desired distance from target to detector shielding.
-            A_detector (float): The desired area of the detector.
-            Ecut (float): The desired minimum energy for an axion to be detected.
-            POT (float): The desired particles on target.
-            gayy_coeff (float): The desired coeff of the axion-photon coupling constant, L_int = gayy_coeff/4 * a_F_Ftilde.
-            gaee_coeff (float): The desired coeff of the axion-electron coupling constant, L_int = gaee_coeff * e * a_ebar_Gamma5_e.
+            folder_name (str, optional): The name of the main output folder.
+            overwrite (bool, optional): If True, existing output files will be overwritten.
+            run_ids_to_include (list, optional): A list of run_ids to include. Defaults to all.
+            *
+            Ndiscovery (float): The required number of events for discovery. MUST be provided.
+            gaee_coeff (float): The axion-electron coupling constant. MUST be provided.
+            gayy_coeff (float): The axion-photon coupling constant. MUST be provided.
+            **optional_exp_params: Other optional keyword arguments to override for this run
+                (e.g., POT=1e22, Lpipe=150, Ecut=0.5).
+
+        Returns:
+            dict: A dictionary mapping mass values to their output directories.
         """
-        print("\n####################\nStarting Experimental Weighting Run...\n####################")
+        print("\n####################\nStarting Data Finalization and On-the-Fly Weighting...\n####################")
 
-        # it takes arguments, fills defaults from self.params_dict, and then
-        # updates self.params_dict to a final, consistent state.
-        if Lpipe is None:
-            Lpipe= self.params_dict['Lpipe']
-        if l0 is None:
-            l0= self.params_dict['l0']
-        if A_detector is None:
-            A_detector= self.params_dict['A_detector']
-        if Ecut is None:
-            Ecut= self.params_dict['Ecut']
-        if POT is None:
-            POT= self.params_dict['POT']
-        if gayy_coeff is None:
-            gayy_coeff=self.params_dict['gayy_coeff']
-        if gaee_coeff is None:
-            gaee_coeff=self.params_dict['gaee_coeff']
-        if inelastic_on is None:
-            inelastic_on=self.params_dict['inelastic_on']
-        
-        # --- 1. Update the object's parameters. ---
-        print("\n--> Step 1: Setting and saving the target parameter state for this run.")
-        changes_dict=self._update_params_dict(gayy_coeff= gayy_coeff, gaee_coeff=gaee_coeff, Lpipe=Lpipe, l0=l0, A_detector=A_detector, Ecut=Ecut, POT=POT,inelastic_on=inelastic_on, print_updates=True)
+        # --- Step 1: Create the run-specific parameter dictionary ---
+        print("\n--> Step 1: Preparing parameters for this finalization run.")
 
-        # --- The rest of this function remains unchanged as its core logic is correct ---
-        folder_path = self.DATA_folder_path
-        all_axion_dirs = [
-            os.path.join(folder_path, 'annihilation_axs'),
-            os.path.join(folder_path, 'compton_axs'),
-            os.path.join(folder_path, 'brem_el_axs'),
-            os.path.join(folder_path, 'brem_pos_axs'),
-            os.path.join(folder_path, 'primakoff_axs'),
-            os.path.join(folder_path, 'brem_prim_axs'),
-            os.path.join(folder_path, 'primakoff_prim_axs')
-        ]
-        existing_axion_dirs = [d for d in all_axion_dirs if os.path.exists(d)]
+        # Start with the object's stable, default parameters.
+        run_params = self.params_dict.copy()
 
-        if not existing_axion_dirs:
-            print("\n[Warning] No data directories found. Nothing to update.")
-            return
-        
+        # Create a unified dictionary of all overrides provided by the user.
+        overrides = {
+            'gaee_coeff': gaee_coeff,
+            'gayy_coeff': gayy_coeff,
+        }
+        overrides.update(optional_exp_params) # Add any other optional overrides
+
+        # Print a clear summary of what is being used for this run.
+        print("    Applying the following parameters for this run:")
+        for key, value in overrides.items():
+            old_value = run_params.get(key)
+            old_str = f"{old_value:.4g}" if isinstance(old_value, float) else str(old_value)
+            new_str = f"{value:.4g}" if isinstance(value, float) else str(value)
+            print(f"      - {key}: {old_str} -> {new_str}")
+
+        # Apply the overrides to create the final parameter set for this run.
+        run_params.update(overrides)
+    
+        plot_folder_path = os.path.join(self.DATA_folder_path, folder_name)
+        print(f"\n--> Step 2: Aggregating and weighting data.")
+        print(f"    Output directory: {os.path.abspath(plot_folder_path)}")
+        print(f"    Overwrite existing files: {overwrite}")
+
+        if run_ids_to_include:
+            run_ids_to_include = [str(rid) for rid in run_ids_to_include]
+            print(f"    Filtering for run_ids: {run_ids_to_include}")
+
+        # Define which processes are driven by electrons vs. photons for weighting
         electron_based_processes = [
             'annihilation_axs', 'compton_axs', 'brem_el_axs', 
             'brem_pos_axs', 'brem_prim_axs'
         ]
 
-        print("\n--> Step 2: Enforcing state by re-weighting all discovered axion data batches.")
-        total_files_updated = 0
-        for axion_dir in existing_axion_dirs:
-            dir_basename = os.path.basename(axion_dir)
-            print(f"--- Scanning Directory: {os.path.basename(axion_dir)} ---")
-            
-            is_electron_based = dir_basename in electron_based_processes
-            process_type = "Electron-based" if is_electron_based else "Primakoff"
-            print(f"    Process type detected as: {process_type}")
-            
-            files_in_dir_updated = 0
-            
-            files_to_process = [f for f in os.listdir(axion_dir) if f.startswith('ax_') and f.endswith('.pkl')]
-            if not files_to_process:
-                print("    No axion files found in this directory.")
-                continue
-
-            for filename in files_to_process:
-                file_path = os.path.join(axion_dir, filename)
-                try:
-                    axion_data_dict = self._load_dict(file_path, VB=False)
-                    if not axion_data_dict: continue
-
-                    mass_key = list(axion_data_dict.keys())[0]
-                    axion_list = axion_data_dict[mass_key]
-                    updated_axion_list = axions_exp_weights(axion_list, self.params_dict, is_electron_based)
-                    self._save_dict({mass_key: updated_axion_list}, file_path, VB=False)
-                    files_in_dir_updated += 1
-                    
-                except Exception as e:
-                    print(f"❌ ERROR updating file {filename}: {e}")
-            
-            if files_in_dir_updated > 0:
-                print(f"--> Enforced state and experimental weights for {files_in_dir_updated} batch file(s).")
-                total_files_updated += files_in_dir_updated
-
-        self.logger.log_update(self, changes_dict, True, updated_masses=[])
-        print(f"\n####################\nState enforcement complete. {total_files_updated} total batch files processed.\n####################")
-
-
-    ##############
-    #PLOTTING METHODS
-    ##############  
-                    
-    def finalize_data(
-        self,
-        folder_name='PLOT',
-        overwrite: bool = True,
-        run_ids_to_include=None,
-        **exp_params
-    ):
-        """
-        Collects, re-weights, and finalizes data into a per-mass directory structure.
-
-        This is the primary method for preparing data for plotting. It performs two main actions:
-        1.  It enforces a consistent set of experimental weights on all raw data files
-            by calling `run_exp_weights`. You can pass parameters like `POT`, `Lpipe`, etc.,
-            directly to this function.
-        2.  It aggregates the re-weighted data, creating a subdirectory for each mass
-            (e.g., 'PLOT/0.1/') with a separate file for each process.
-        3.  It saves a 'parameters.json' file in the output folder for traceability.
-
-        Args:
-            folder_name (str, optional): The name of the main output folder. Defaults to 'PLOT'.
-            overwrite (bool, optional): If True (default), existing data files will
-                be overwritten. If False, any existing file will be skipped.
-            run_ids_to_include (list, optional): A list of run_ids to include. Defaults to all.
-            **exp_params: Keyword arguments for experimental parameters to be passed directly
-                to `run_exp_weights`. For example: `POT=1e22`, `Lpipe=150`.
-        
-        Returns:
-            dict: A dictionary mapping mass values to their output directories.
-        """
-        print("\n> Starting data finalization...")
-        plot_folder_path = os.path.join(self.DATA_folder_path, folder_name)
-        print(f"  Output directory: {os.path.abspath(plot_folder_path)}")
-        print(f"  Overwrite existing files: {overwrite}")
-        
-        # If exp_params is empty, run_exp_weights will use its defaults (the current state).
-        # If exp_params has values, they will be used for the re-weighting.
-        print("\n> Applying experimental weights to all axions...")
-        self.run_exp_weights(**exp_params)
-
-        # --- The rest of the logic remains largely the same ---
-        if run_ids_to_include:
-            run_ids_to_include = [str(rid) for rid in run_ids_to_include]
-            print(f"  Filtering for run_ids: {run_ids_to_include}")
-
+        # Map friendly names to source directories
         process_map = {
             'Annihilation': os.path.join(self.DATA_folder_path, 'annihilation_axs'),
             'Compton': os.path.join(self.DATA_folder_path, 'compton_axs'),
@@ -2101,6 +2278,7 @@ class AxionShower:
         }
         if self.primaries == 'electrons':
             process_map['Brem_primary'] = os.path.join(self.DATA_folder_path, 'brem_prim_axs')
+            process_map['Primakoff_EPA'] = os.path.join(self.DATA_folder_path, 'primakoff_epa_axs')
         elif self.primaries == 'photons':
             process_map['Primakoff_primary'] = os.path.join(self.DATA_folder_path, 'primakoff_prim_axs')
 
@@ -2109,27 +2287,45 @@ class AxionShower:
         for process_name, source_dir in process_map.items():
             if not os.path.exists(source_dir): continue
 
-            # Data aggregation logic... (no changes here)
+            # Determine if this process needs electron-based weighting
+            dir_basename = os.path.basename(source_dir)
+            is_electron_based = dir_basename in electron_based_processes
+
             aggregated_axions_by_mass = {}
             total_primaries_by_mass = {}
             batches_per_mass = {}
+
+            # Scan through all raw batch files for this process
             for filename in os.listdir(source_dir):
                 if not (filename.startswith('ax_') and filename.endswith('.pkl')): continue
+                
                 run_id = filename.split('_')[-1].replace('.pkl', '')
                 if run_ids_to_include and run_id not in run_ids_to_include: continue
+                
+                # Load the raw, untouched data
                 batch_data = self._load_dict(os.path.join(source_dir, filename), VB=False)
-                for ma, axions in batch_data.items():
-                    if not axions: continue
+
+                for ma, axion_list in batch_data.items():
+                    if not axion_list: continue
+                    
+                    # *** APPLY WEIGHTS HERE, IN-MEMORY ***
+                    weighted_axion_list = axions_exp_weights(axion_list, run_params, is_electron_based)
+                    
                     if ma not in aggregated_axions_by_mass:
                         aggregated_axions_by_mass[ma] = []
                         total_primaries_by_mass[ma] = 0
                         batches_per_mass[ma] = 0
-                    aggregated_axions_by_mass[ma].extend(axions)
-                    total_primaries_by_mass[ma] += axions[0].get('N_primaries', 0)
+                    
+                    # Add the *weighted* data to our aggregate list
+                    aggregated_axions_by_mass[ma].extend(weighted_axion_list)
+                    
+                    # The number of primaries is metadata from the raw file
+                    total_primaries_by_mass[ma] += axion_list[0].get('N_primaries', 0)
                     batches_per_mass[ma] += 1
+
             if not aggregated_axions_by_mass: continue
             
-            # Print summary and write files... (no changes here)
+            # --- This section remains the same, but now operates on weighted data ---
             print("\n" + "="*80)
             print(f"Finalization Summary for: {process_name}")
             print(f"  > Output structure: {folder_name}/<mass>/{process_name}.pkl")
@@ -2157,27 +2353,28 @@ class AxionShower:
             print("="*80)
 
         # --- Save the parameters used for this run to a JSON file ---
-        # The self.params_dict was updated by run_exp_weights, so it's our source of truth.
-        if created_dirs_by_mass: # Only save if we actually created/updated some data
+        # This now correctly saves the temporary, run-specific parameters.
+        if created_dirs_by_mass: 
             params_file_path = os.path.join(plot_folder_path, 'parameters.json')
-            print(f"\n> Saving experimental parameters to: {params_file_path}")
+            print(f"\n> Saving run-specific experimental parameters to: {params_file_path}")
             try:
-                # Ensure the main plot directory exists
                 os.makedirs(plot_folder_path, exist_ok=True)
                 with open(params_file_path, 'w') as f:
-                    json.dump(self.params_dict, f, indent=4)
-                print("  ✅ Parameters saved successfully.")
+                    json.dump(run_params, f, indent=4)
+                print("  ✅ Parameters for this run saved successfully.")
             except Exception as e:
                 print(f"  ❌ ERROR saving parameters file: {e}")
 
-        print("\n✅ All processes finalized.\n")
-        return created_dirs_by_mass
+
+        print("\n✅ All processes finalized and weighted.\n")
+        return created_dirs_by_mass                 
     
+
     def plot_histo_flux(self, masses, folder_name='PLOT', w=5, h=4, legend_title_text=None,
                         bins_per_decade=20, log_scale=True, weights_to_use=None,
                         gaee_factor=None, gayy_factor=None, xlim=None, ylim=None,
                         plot_subprocesses=False, processes_to_plot=None,
-                        save_plot=True, plot_filename='Flux.png', plot_title=''):
+                        save_plot=True, plot_filename='Flux.png', plot_title='',ylabel=r'Axions $\times f^4$ / POT $[{\rm GeV}^{4}]$'):
         """
         Plots a publication-quality axion flux histogram from finalized data.
 
@@ -2223,6 +2420,7 @@ class AxionShower:
             'primakoff_shower': {'file': 'Primakoff_shower.pkl', 'label': r'', 'coupling': 'gayy'},
             'brem_primary': {'file': 'Brem_primary.pkl', 'label': r'Brem, Primary', 'coupling': 'gaee'},
             'primakoff_primary': {'file': 'Primakoff_primary.pkl', 'label': r'Primakoff, Primary', 'coupling': 'gayy'},
+            'primakoff_epa': {'file': 'Primakoff_EPA.pkl', 'label': r'EPA Primakoff, Primary', 'coupling': 'gayy'},
         }
 
          # --- 2. Build Plotting Recipes ---
@@ -2257,7 +2455,8 @@ class AxionShower:
 
             # Add the primary process recipe regardless of subprocess plotting
             if self.primaries == 'electrons':
-                recipes.append({'keys': ['brem_primary'], 'label': r'Brem, Primary'})
+                recipes.append({'keys': ['brem_primary'], 'label': r'Bremsstrahlung, Primary'})
+                recipes.append({'keys': ['primakoff_epa'], 'label': r'EPA Primakoff, Primary'}) # Add EPA recipe
             elif self.primaries == 'photons':
                 recipes.append({'keys': ['primakoff_primary'], 'label': r'Primakoff, Primary'})
 
@@ -2326,8 +2525,9 @@ class AxionShower:
                 ax.hist(E_values, bins=common_bins, weights=weights, histtype='step', linewidth=2.0, label=plot_label)
 
         # --- 5. Apply Final Formatting and Layout ---
+        
         ax.set_xlabel(r'Energy $E$ [GeV]')
-        ax.set_ylabel(r'Axions $\times f^4$ / POT $[{\rm GeV}^{4}]$')
+        ax.set_ylabel(ylabel)
 
         if len(masses) == 1:
             ax.set_title(fr'Axion Flux for $m_a = {int(masses[0]*1000)}$ MeV' + plot_title)
@@ -2357,183 +2557,92 @@ class AxionShower:
 
         plt.show()
     
-#     def plot_histo_flux(self, ma, folder_name='PLOT', w=5, h=4, legend_title_text=None,
-#                     bins_per_decade=20, log_scale=True, weights_to_use=None,
-#                     gaee_factor=None, gayy_factor=None, xlim=None, ylim=None, plot_subprocesses=False, save_plot=True, plot_filename='Flux.png',plot_title=''):
-#         """
-#         Plots a publication-quality axion flux histogram from finalized data.
 
-#         This function uses a helper to set a precise figure size and applies styling
-#         to closely match professional examples. It correctly loads data from the
-#         `folder_name/<mass>/<ProcessName>.pkl` structure.
-
-#         Args:
-#             ma (float): The specific axion mass to plot.
-#             folder_name (str): The directory containing the finalized data.
-#             w, h (float): The target width and height of the axes area in inches.
-#             legend_title_text (str): Optional title for the plot legend.
-#             bins_per_decade (int, optional): Number of bins per decade of energy. Defaults to 20.
-#             log_scale (bool): Use logarithmic scale for the y-axis if True.
-#             weights_to_use (list of str): List of weight keys to multiply from the data.
-#             lim (tuple, optional): A tuple (xmin, xmax) to manually set the x-axis limits.
-#             ylim (tuple, optional): A tuple (ymin, ymax) to manually set the y-axis limits.
-#             plot_subprocesses (bool): If True, plots individual contributions (e.g., Annihilation,
-#                                       Compton) separately instead of combining them. Defaults to False.
-#         """
-#         # --- 1. Setup Paths, Plotting Style, and Process Mappings ---
-#         plt.rc('text', usetex=True)
-#         plt.rc('font', family='serif')
-
-#         mass_dir_path = os.path.join(self.DATA_folder_path, folder_name, str(ma))
-#         if not os.path.isdir(mass_dir_path):
-#             print(f"[Error] Directory for mass '{ma}' not found. Please run `finalize_data()`.")
-#             return
-
-#         process_filename_map = {
-#             'ann': 'Annihilation.pkl', 'comp': 'Compton.pkl', 'brem_el': 'Brem_el.pkl',
-#             'brem_pos': 'Brem_pos.pkl', 'primakoff_shower': 'Primakoff_shower.pkl',
-#             'brem_primary': 'Brem_primary.pkl', 'primakoff_primary': 'Primakoff_primary.pkl'
-#         }
-
-#         # --- 2. Create Plotting Recipes ---
-#         plot_recipes = []
-#         # Annihilation and Compton
-#         if not plot_subprocesses:
-#             plot_recipes.append({'label': r'Annihilation + Compton', 'keys': ['ann', 'comp'], 'rescale': gaee_factor or 1})
-#         else:
-#             plot_recipes.extend([
-#                 {'label': r'Annihilation', 'keys': ['ann'],  'rescale': gaee_factor or 1},
-#                 {'label': r'Compton', 'keys': ['comp'],  'rescale': gaee_factor or 1}
-#             ])
-
-#         # Bremsstrahlung from shower electrons/positrons
-#         if not plot_subprocesses:
-#             plot_recipes.append({'label': r'Bremsstrahlung, Shower', 'keys': ['brem_el', 'brem_pos'], 'rescale': gaee_factor or 1})
-#         else:
-#             plot_recipes.extend([
-#                 {'label': r'Brem, Shower e-', 'keys': ['brem_el'],  'rescale': gaee_factor or 1},
-#                 {'label': r'Brem, Shower e+', 'keys': ['brem_pos'], 'rescale': gaee_factor or 1}
-#             ])
-
-#         # Primakoff from shower photons
-#         plot_recipes.append({'label': r'Primakoff, Shower', 'keys': ['primakoff_shower'], 'rescale': gayy_factor or 1})
-
-
-#         # --- 2. Conditionally Add the Primary Beam Process ---
-#         # This is the ONLY part that depends on the initial beam type.
-
-#         if self.primaries == 'electrons':
-#             plot_recipes.append({'label': r'Brem, Primary', 'keys': ['brem_primary'], 'rescale': gaee_factor or 1})
-#         elif self.primaries == 'photons':
-#             plot_recipes.append({'label': r'Primakoff, Primary', 'keys': ['primakoff_primary'], 'rescale': gayy_factor or 1})
-
-#         # --- 3. Load Data and Prepare for Plotting ---
-#         data_to_plot = []
-#         for recipe in plot_recipes:
-#             combined_axion_list = []
-#             for key in recipe['keys']:
-#                 file_path = os.path.join(mass_dir_path, process_filename_map.get(key, ''))
-#                 try:
-#                     with open(file_path, 'rb') as f:
-#                         combined_axion_list.extend(pickle.load(f))
-#                 except FileNotFoundError:
-#                     continue  # Silently ignore missing process files
-
-#             if combined_axion_list:
-#                 data_to_plot.append({
-#                     'recipe': recipe,
-#                     'data': combined_axion_list
-#                 })
-
-#         if not data_to_plot:
-#             print(f"\n[Error] No finalized process files were found for mass ma={ma} in '{mass_dir_path}'.")
-#             return
-
-#         # --- 4. Binning and Plot Creation ---
-#         all_E = [d['p'][0] for item in data_to_plot for d in item['data']]
-#         E_min, E_max = min(all_E), max(all_E)
-#         common_bins = np.logspace(np.log10(E_min), np.log10(E_max), int(np.ceil((np.log10(E_max) - np.log10(E_min)) * bins_per_decade)))
-
-#         fig, ax = plt.subplots(1, 1)
-#         if weights_to_use is None:
-#             weights_to_use = ['w_prod_scaled', 'w_angle', 'w_LLP_gone', 'w_Ecut', 'w_prim']
-
-#         for item in data_to_plot:
-#             rescale_factor = item['recipe']['rescale']**2*(gayy_factor or 1)**2
-#             E_values = [d['p'][0] for d in item['data']]
-#             weights = [np.prod([d.get(wk, 1.0) for wk in weights_to_use])*rescale_factor for d in item['data']]
-#             ax.hist(E_values, bins=common_bins, weights=weights, histtype='step', linewidth=2.0, label=item['recipe']['label'])
-
-#         # --- 5. Apply Final Formatting and Layout ---
-#         ax.set_xlabel(r'Energy $E$ [GeV]')
-#         ax.set_ylabel(r'Axions $\times f^4$ / POT $[{\rm GeV}^{4}]$')
-#         ax.set_title(fr'Axion Flux for $m_a = {int(ma*1000)}$ MeV'+plot_title)
-#         ax.set_xscale('log')
-#         ax.set_yscale('log')
-#         if xlim: ax.set_xlim(xlim)
-#         if ylim: ax.set_ylim(ylim)
-
-#         ax.grid(which='major', linestyle='-', linewidth='0.5', color='gray', alpha=0.8)
-#         #ax.grid(which='minor', linestyle='--', linewidth='0.5', color='gray', alpha=0.4)
-
-#         # Get the handles (the colored lines) and labels created by ax.hist()
-#         handles, labels = ax.get_legend_handles_labels()
-
-
-#         # Create the legend with the combined lists
-#         legend = ax.legend(handles, labels,
-#                            title=legend_title_text, # This is the user-provided title
-#                            handletextpad=0.5,
-#                            #bbox_to_anchor=(1.04, 0.5), 
-#                            loc='upper center', 
-#                            ncol=2)
-#                            #borderaxespad=0.)
-
-#         if legend_title_text:
-#             plt.setp(legend.get_title(),multialignment='left')
-#         set_size(w, h, ax=ax)
-        
-#         plot_folder_path = os.path.join(self.DATA_folder_path, folder_name)
-        
-#         if save_plot:
-           
-#             final_save_path = os.path.join(plot_folder_path, plot_filename)
-            
-#             try:
-#                 fig.savefig(final_save_path, dpi=300, bbox_inches='tight')
-#                 print(f"✅ Plot successfully saved to: {final_save_path}")
-#             except Exception as e:
-#                 print(f"❌ Error saving plot: {e}")
-        
-#         plt.show()
-        
-    def compute_and_save_sensitivities(self, masses=None, folder_name='PLOT', sens_folder_name='Sens', compute_combined=True, compute_separate=True):
+    def compute_and_save_sensitivities(self, folder_name='PLOT', sens_folder_name='Sens', *,
+        # --- Mandatory Analysis Parameter ---
+        N_discovery,
+        POT,
+        # --- Optional arguments ---
+        masses=None, 
+        compute_combined=True, 
+        compute_separate=True):
         """
-        Computes and saves sensitivity curves for logically grouped production channels.
+        Computes sensitivities from a finalized data folder, using the parameters
+        stored within that folder for perfect consistency.
 
-        This method defines computational groups (e.g., Ann+Compton, Brem_el+Brem_pos)
-        and calculates the sensitivity for each group across all specified masses, saving
-        the result to a dedicated pickle file.
-
-        Optionally, if `compute_combined` is True, it will perform a second loop to
-        calculate the physically correct total sensitivity and save it to its own file.
+        This method reads the `parameters.json` file from the target `folder_name`
+        to ensure the sensitivity calculation is perfectly matched to the data's
+        weighting.
 
         Args:
-            masses (list):  A list of mass points to compute for. If None, all available masses will be discovered and used.
-                            Defaults to None.
-            folder_name (str, optional): The directory containing finalized data. Defaults to 'PLOT'.
-            sens_folder_name (str, optional): The directory containing the computed sensitivities. Defaults to 'Sens'.
-            compute_combined (bool, optional): If True, also computes and saves the combined
-                                               sensitivity. Defaults to True.
-            compute_separate (bool, optional): If True, also computes and saves the single channels
-                                               sensitivity. Defaults to True.
+            masses (list): A list of mass points to compute for. If None, all available
+                           masses will be discovered and used.
+            folder_name (str): The directory containing finalized data and a `parameters.json` file.
+            sens_folder_name (str): The directory to save the computed sensitivities.
+            compute_combined (bool): If True, also computes the combined sensitivity.
+            compute_separate (bool): If True, also computes single channel sensitivities.
         """
-        print(f"\n> Computing and Saving Sensitivity Curves from '{folder_name}' folder...")
+        
+        print(f"\n> Computing Sensitivity Curves from '{folder_name}' folder...")
         plot_folder_path = os.path.join(self.DATA_folder_path, folder_name)
 
         if not os.path.exists(plot_folder_path):
             print(f"❌ ERROR: Finalized data folder not found at '{plot_folder_path}'.")
             return
+
+        # === Step 1A: Load the Run-Specific Parameters from the JSON file ===
+        params_file_path = os.path.join(plot_folder_path, 'parameters.json')
+        try:
+            print(f"--> Loading parameters from: {os.path.relpath(params_file_path)}")
+            with open(params_file_path, 'r') as f:
+                run_params = json.load(f)
+            print("    ✅ Parameters loaded successfully.")
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f"❌ ERROR: Could not load or parse '{params_file_path}'.")
+            print(f"    Details: {e}")
+            return
+        
+        run_params['N_discovery'] = N_discovery
+        run_params['POT']=POT
+        # Print key parameters from the run for user confirmation.
+        print("\n--- Key parameters used for this sensitivity computation: ---")
+        print(f"    gaee_coeff:  {run_params.get('gaee_coeff', 'N/A')}")
+        print(f"    gayy_coeff:  {run_params.get('gayy_coeff', 'N/A')}")
+        print(f"    N_discovery: {run_params.get('N_discovery', 'N/A')}")
+        print(f"    POT:         {run_params.get('POT', 'N/A')}")
+        print("---------------------------------------------------------")
+
+        # === Step 1B: Compare to Session Defaults and Highlight Differences ===
+        # Define the keys that are specific to the finalization run and should be excluded from this comparison.
+        run_specific_keys = {'N_discovery', 'gaee_coeff', 'gayy_coeff'}
+
+        param_diffs = {}
+
+        # Iterate through the parameters loaded from the run's JSON file.
+        for key, run_value in run_params.items():
+            # Skip the keys we've designated as run-specific.
+            if key in run_specific_keys:
+                continue
+
+            # Check if the key exists in the current session's default parameters.
+            if key in self.params_dict:
+                default_value = self.params_dict[key]
+
+                # If the values are different, record it for printing.
+                if run_value != default_value:
+                    param_diffs[key] = (default_value, run_value)
+
+        if param_diffs:
+            print("\n--- Experimental setup differs from current session defaults ---")
+            print(f"{'Parameter':<17} {'Session Default':<20} {'Run Value':<20}")
+            print("="*60)
+            for key, (default_val, run_val) in sorted(param_diffs.items()):
+                default_str = f"{default_val:.4g}" if isinstance(default_val, (float, int)) else str(default_val)
+                run_str = f"{run_val:.4g}" if isinstance(run_val, (float, int)) else str(run_val)
+                print(f"{key:<17} {default_str:<20} {run_str:<20}")
+            print("="*60)
+        else:
+            print("\n[Info] Experimental setup parameters (POT, Lpipe, etc.) match the current session's defaults.")
 
         # --- Mass Discovery Block ---
         if masses is None:
@@ -2580,6 +2689,12 @@ class AxionShower:
             },
             'Primakoff_primary': {
                 'sources': ['Primakoff_primary']
+            },
+            'Primakoff_EPA': {
+                'sources': ['Primakoff_EPA']
+            },
+            'Primary_combined': {
+                'sources': ['Brem_primary', 'Primakoff_EPA']
             }
         }
 
@@ -2607,7 +2722,7 @@ class AxionShower:
 
                     axions_for_calc = copy.deepcopy(axions_for_group)
 
-                    result, approx_result = sensitivity_exact_fast(axions_for_calc, self.params_dict)
+                    result, approx_result = sensitivity_exact_fast(axions_for_calc, run_params)
                     
                     group_results_with_info[ma] = (result, approx_result, len(axions_for_group))
 
@@ -2648,9 +2763,6 @@ class AxionShower:
                 
                 all_axions_combined = []
                 for process_name, group_info in all_processes_map.items():
-                    
-                    # if 'primary' in process_name:
-                    #     continue # Skip this iteration if the process is a primary one cause shower brem and primakoff already have primaries!
 
                     file_path = os.path.join(plot_folder_path, str(ma), f"{process_name}.pkl")
                     if os.path.exists(file_path):
@@ -2661,7 +2773,7 @@ class AxionShower:
                 
                 if not all_axions_combined: continue
 
-                result, approx_result = sensitivity_exact_fast(all_axions_combined, self.params_dict)
+                result, approx_result = sensitivity_exact_fast(all_axions_combined, run_params)
                 
                 combined_results_with_info[ma] = (result, approx_result, len(all_axions_combined))
             
@@ -2685,47 +2797,69 @@ class AxionShower:
                 clean_results = {k: v[0] for k, v in combined_results_with_info.items()}
                 self._save_dict(clean_results, output_path)
                 print(f"💾 Combined results saved to: {os.path.relpath(output_path)}\n")
+                
+        params_file_path = os.path.join(sensitivity_folder_path, 'parameters.json')
+        print(f"\n> Saving run-specific experimental parameters to: {params_file_path}")
+        try:
+            os.makedirs(plot_folder_path, exist_ok=True)
+            with open(params_file_path, 'w') as f:
+                json.dump(run_params, f, indent=4)
+            print("  ✅ Parameters for this run saved successfully.")
+        except Exception as e:
+            print(f"  ❌ ERROR saving parameters file: {e}")
         
         print("\n✅ All requested sensitivity computations complete.\n")
         
-  
- 
 
     def plot_sensitivities(self, results_path, filenames=None,
                            plot_params_map=None,
                            y_rescale=None,y_label=r'$1/f$ [GeV$^{-1}$]',
                            title='ALPs Sensitivity', malim=None, ylim=None,
-                            plot_filename=None,
+                           plot_filename=None,
                            legend_title_text=None,w=6,h=5):
         """
-        Loads and plots sensitivity curves from various data formats with enhanced control.
+        Loads and plots sensitivity curves using a structured parameter map.
 
-        This upgraded function can handle:
-        - Standard filled regions: {mass: [lower_bound, upper_bound]}
-        - Single lower-bound lines: {mass: [lower_bound, None]}
-        - Single upper-bound lines: {mass: [None, upper_bound]}
-        - Complex ordered paths: {'x_values': [...], 'y_values': [...]}
+        This function uses a declarative approach for styling. Parameters for lines and
+        fills are passed in nested dictionaries called `line_specs` and `fill_specs`.
+        Any valid Matplotlib argument can be placed in these dictionaries.
 
+        Top-level parameters in a process's config can serve as shared defaults for
+        both the line and the fill, which are then overridden by specific specs.
+
+        Special Top-Level Control Keys (for function behavior):
+        - plot, label, fill, fill_above, fill_below, close_curve,
+        - named_line, label_x_pos, ma_max, plot_low, plot_up
+
+        Example `plot_params_map` entry:
+        'my_process': {
+            'label': 'My Process',
+            'fill': True,
+            'color': 'navy',  # Shared default color for both line and fill
+            'line_specs': {
+                'linestyle': '--',
+                'linewidth': 2
+            },
+            'fill_specs': {
+                'color': 'lightblue', # Overrides the shared default for the fill
+                'hatch': '///',
+                'alpha': 0.5
+            }
+        }
         """
         # --- Block 1: File Discovery ---
         sensitivity_folder_path = os.path.join(self.DATA_folder_path, results_path)
         if not os.path.isdir(sensitivity_folder_path):
             print(f"❌ Error: Results directory not found at '{sensitivity_folder_path}'")
             return
-        plot_params_map = plot_params_map or {} # Ensure plot_params_map is a dict
-        
+        plot_params_map = plot_params_map or {}
+
         if filenames is None:
-            # If no explicit filenames are given, decide which files to plot based on plot_params_map.
             if plot_params_map:
-                # If plot_params_map is NOT empty, only plot files corresponding to its keys.
-                print(f"ℹ️ `plot_params_map` is provided. Plotting only specified processes: {list(plot_params_map.keys())}")
                 filenames_to_plot = sorted([f"sensitivity_{key}.pkl" for key in plot_params_map.keys()])
             else:
-                # If plot_params_map IS empty, revert to the original behavior: plot all .pkl files.
-                print("ℹ️ `plot_params_map` is empty. Plotting all '.pkl' files found.")
                 filenames_to_plot = sorted([f for f in os.listdir(sensitivity_folder_path) if f.endswith('.pkl')])
         else:
-            # If a list of filenames is explicitly passed, use it (highest priority).
             filenames_to_plot = filenames
 
         # --- Block 2: Load Data ---
@@ -2738,18 +2872,22 @@ class AxionShower:
 
         # --- Block 3: Plotting Logic ---
         fig=plt.figure(figsize=(w, h))
-        plot_params_map = plot_params_map or {}
         default_colors = cycle(['C0', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7'])
         lines_to_be_labeled = []
         label_x_pos=[]
         
-        # Establish plotting order
         ordered_processes = list(plot_params_map.keys())
         remaining_processes = sorted([p for p in couplings_data.keys() if p not in ordered_processes])
         final_plot_order = ordered_processes + remaining_processes
         print(f"🎨 Plotting order: {final_plot_order}")
+        
+        # Define keys that are NOT style kwargs but control the function's behavior
+        BEHAVIOR_KEYS = {
+            'plot', 'label', 'fill', 'fill_above', 'fill_below', 'close_curve',
+            'named_line', 'label_x_pos', 'ma_max', 'plot_low', 'plot_up',
+            'line_specs', 'fill_specs' # These are also special keys
+        }
 
-        # Main plotting loop
         for process_name in final_plot_order:
             if process_name not in couplings_data: continue
             
@@ -2758,129 +2896,95 @@ class AxionShower:
             
             if not params.get('plot', True): continue
 
-            # Get styling parameters
+            # --- Build kwargs from specs ---
+            # 1. Start with plot-wide defaults.
+            default_color = next(default_colors)
+            base_line_kwargs = {'zorder': 10, 'color': default_color, 'label': params.get('label','')}
+            base_fill_kwargs = {'zorder': 2, 'color': default_color, 'alpha': 0.15, 'linewidth': 0, 'label': '_nolegend_' }
+
+            # 2. Collect shared kwargs from the top-level of the params dict.
+            shared_kwargs = {k: v for k, v in params.items() if k not in BEHAVIOR_KEYS}
+            base_line_kwargs.update(shared_kwargs)
+            base_fill_kwargs.update(shared_kwargs)
+
+            # 3. Create final kwargs by overriding with specific specs.
+            line_kwargs = base_line_kwargs.copy()
+            line_kwargs.update(params.get('line_specs', {}))
+            
+            fill_kwargs = base_fill_kwargs.copy()
+            fill_kwargs.update(params.get('fill_specs', {}))
+            
             label = params.get('label', process_name.replace('_', ' '))
-            color = params.get('color', next(default_colors))
-            linestyle = params.get('linestyle', '-')
-            marker = params.get('marker', None) # FIX: No more hardcoded markers
-            markersize = params.get('markersize', None)
-            zorder_line = params.get('zorder', 10)
-            zorder_fill = params.get('zorder_fill', params.get('zorder', 2))
             ma_max_cutoff = params.get('ma_max')
-            # --- Data Extraction and Plotting ---
             label_for_plot = label
 
-            # Case 1: Handle complex, ordered paths (e.g., ALPINIST)
+            # --- Data Processing and Plotting ---
             if 'x_values' in data_dict and 'y_values' in data_dict:
-                print(f"🎨 Plotting '{process_name}' as a continuous, ordered path.")
-                x_data = data_dict['x_values']
-                y_data = data_dict['y_values']
-                line, = plt.plot(x_data, y_data, linestyle=linestyle, marker=marker, markersize=markersize,
-                                 label=label, color=color, zorder=zorder_line)
+                line_kwargs['label'] = label
+                line, = plt.plot(data_dict['x_values'], data_dict['y_values'], **line_kwargs)
                 if params.get('named_line', False):
                     lines_to_be_labeled.append(line)
                     label_x_pos.append(params.get('label_x_pos',None))
-                    
-                continue # Go to the next file
+                continue
 
-            # Case 2: Handle standard regions and single lines (keyed by mass)
             all_ma_points = sorted([ma for ma, bounds in data_dict.items() if bounds and (bounds[0] is not None or bounds[1] is not None)])
             if not all_ma_points: continue
-
             ma_list_low = [ma for ma in all_ma_points if data_dict[ma][0] is not None and not np.isnan(data_dict[ma][0])]
             c_values_dwn = [data_dict[ma][0] for ma in ma_list_low]
-            
             ma_list_up = [ma for ma in all_ma_points if data_dict[ma][1] is not None and not np.isnan(data_dict[ma][1])]
             c_values_up = [data_dict[ma][1] for ma in ma_list_up]
             
-            # Apply ma_max truncation if specified
             if ma_max_cutoff is not None:
-                print(f"✂️ Truncating '{process_name}' at ma = {ma_max_cutoff} GeV.")
                 if ma_list_low:
                     filtered_low = [(ma, c) for ma, c in zip(ma_list_low, c_values_dwn) if ma <= ma_max_cutoff]
                     ma_list_low, c_values_dwn = zip(*filtered_low) if filtered_low else ([], [])
                 if ma_list_up:
                     filtered_up = [(ma, c) for ma, c in zip(ma_list_up, c_values_up) if ma <= ma_max_cutoff]
                     ma_list_up, c_values_up = zip(*filtered_up) if filtered_up else ([], [])
-
-            # Re-convert tuples from zip back to lists
             ma_list_low, c_values_dwn = list(ma_list_low), list(c_values_dwn)
             ma_list_up, c_values_up = list(ma_list_up), list(c_values_up)
 
-            
             if params.get('close_curve', False):
                 if ma_list_low and ma_list_up:
-                    print(f"🎨 Plotting '{process_name}' as a closed curve (Robust Method).")
                     x_closed = ma_list_low + ma_list_up[::-1]
                     y_closed = c_values_dwn + c_values_up[::-1]
-                    
-                    line, = plt.plot(x_closed, y_closed, linestyle=linestyle, marker=marker, markersize=markersize, 
-                                     label=label, color=color, zorder=zorder_line)
-                    if params.get('named_line', False):
-                        lines_to_be_labeled.append(line)
-                        label_x_pos.append(params.get('label_x_pos',None))
-                    if params.get('fill', True):
-                        plt.fill(x_closed, y_closed, alpha=0.15, color=color, zorder=zorder_fill, label='_nolegend_')
-                else:
-                    print(f"⚠️ Warning: 'close_curve' requested for '{process_name}', but it does not have both upper and lower bounds. Skipping.")
+                    if 'label' not in params.get('line_specs', {}):
+                        line_kwargs['label'] = label
+                    line, = plt.plot(x_closed, y_closed, **line_kwargs)
+                    if params.get('named_line', False): lines_to_be_labeled.append(line); label_x_pos.append(params.get('label_x_pos',None))
+                    if params.get('fill', True): plt.fill(x_closed, y_closed,  **fill_kwargs)
                 continue
-
             
-            
-            current_ylim = plt.ylim() # Get plot limits for filling
+            current_ylim = plt.ylim()
             if params.get('fill_above', False) and c_values_dwn:
-                # Exclusion region ABOVE a lower bound line
-                # ### --- CHANGE: EXPLICITLY HIDE FILL FROM LEGEND --- ###
-                plt.fill_between(ma_list_low, c_values_dwn, current_ylim[1], 
-                                 color=color, alpha=0.15, zorder=zorder_fill, linewidth=0, label='_nolegend_')
-
+                plt.fill_between(ma_list_low, c_values_dwn, current_ylim[1], **fill_kwargs)
             elif params.get('fill_below', False) and c_values_up:
-                # Region BELOW an upper bound line
-                # ### --- CHANGE: EXPLICITLY HIDE FILL FROM LEGEND --- ###
-                plt.fill_between(ma_list_up, c_values_up, current_ylim[0], 
-                                 color=color, alpha=0.15, zorder=zorder_fill, linewidth=0, label='_nolegend_')
-            
+                plt.fill_between(ma_list_up, c_values_up, current_ylim[0],**fill_kwargs)
             elif params.get('fill', True):
-                # Standard region fill BETWEEN two curves
                 if ma_list_low and ma_list_up:
                     ma_for_fill = sorted(list(set(ma_list_low) & set(ma_list_up)))
                     c_dwn_map = {ma: c for ma, c in zip(ma_list_low, c_values_dwn)}
                     c_up_map = {ma: c for ma, c in zip(ma_list_up, c_values_up)}
                     c_dwn_for_fill = [c_dwn_map[ma] for ma in ma_for_fill]
                     c_up_for_fill = [c_up_map[ma] for ma in ma_for_fill]
-                    # ### --- CHANGE: EXPLICITLY HIDE FILL FROM LEGEND --- ###
-                    plt.fill_between(ma_for_fill, c_dwn_for_fill, c_up_for_fill, 
-                                     alpha=0.15, color=color, zorder=zorder_fill, linewidth=0, label='_nolegend_')
+                    plt.fill_between(ma_for_fill, c_dwn_for_fill, c_up_for_fill, **fill_kwargs)
             
-            # --- Plotting the boundary lines (now fully controlled by params) ---
             if params.get('plot_low', True) and ma_list_low:
-                line, = plt.plot(ma_list_low, c_values_dwn, linestyle=linestyle, marker=marker, markersize=markersize,
-                         label=label_for_plot, color=color, zorder=zorder_line)
-                if params.get('named_line', False):
-                    lines_to_be_labeled.append(line)
-                    label_x_pos.append(params.get('label_x_pos',None))
-                label_for_plot = None
+                line_kwargs['label'] = label_for_plot
+                line, = plt.plot(ma_list_low, c_values_dwn, **line_kwargs)
+                if params.get('named_line', False): lines_to_be_labeled.append(line); label_x_pos.append(params.get('label_x_pos',None))
+                label_for_plot = None # Ensure label is only used once
                 
             if params.get('plot_up', True) and ma_list_up:
-                line, = plt.plot(ma_list_up, c_values_up, linestyle=linestyle, marker=marker, markersize=markersize,
-                         label=label_for_plot, color=color, zorder=zorder_line)
-                # Only add if the lower line wasn't already added (label_for_plot is not None)
-                if params.get('named_line', False) and label_for_plot is not None:
-                     lines_to_be_labeled.append(line)
-                     label_x_pos.append(params.get('label_x_pos',None))
+                line_kwargs['label'] = label_for_plot
+                line, = plt.plot(ma_list_up, c_values_up, **line_kwargs)
+                if params.get('named_line', False) and label_for_plot is not None: lines_to_be_labeled.append(line); label_x_pos.append(params.get('label_x_pos',None))
         
-        if lines_to_be_labeled:
-            print(f"✍️ Placing labels directly on {len(lines_to_be_labeled)} curve(s).")
-            labelLinesWithOptionalXvals(lines_to_be_labeled,xvals=label_x_pos,
-                       align=False,
-                       zorder=20,
-                       outline_width=5,         
-                       outline_color='white',
-                       fontsize=14,             
-                       fontweight='bold', 
-                       alpha=0.8) 
-            
         # --- Final Plotting Setup ---
+        if lines_to_be_labeled:
+            labelLinesWithOptionalXvals(lines_to_be_labeled, xvals=label_x_pos, align=False, ha='left', zorder=20, 
+                                        outline_width=3, outline_color='white', fontsize=14, fontweight='bold', alpha=0.9)
+        
         if y_rescale is not None: 
             _, new_label = y_rescale
             plt.ylabel(new_label)
@@ -2891,26 +2995,16 @@ class AxionShower:
         plt.xscale('log')
         plt.yscale('log')
         
-        # This will apply the ylim from the function call, which is important for fill_above/below
-        if ylim is not None:
-            plt.ylim((ylim[0],ylim[1]))
-        if malim is not None:
-            plt.xlim(left=malim[0],right=malim[1])
+        if ylim is not None: plt.ylim(ylim)
+        if malim is not None: plt.xlim(malim)
             
         plt.title(title)
         plt.grid(True, linestyle='--', linewidth=0.5)
         
-        
         if not lines_to_be_labeled:  
             legend = plt.legend(title=legend_title_text, handletextpad=0.5, ncol=1, alignment='center')
-
-            #Check if the legend actually has a title before trying to modify it
             if legend_title_text and legend.get_title():
                 plt.setp(legend.get_title(), multialignment='left')
-
-            # Also, check if the legend is empty and remove it if so.
-            if not legend.get_texts() and not legend.get_legend_handles():
-                legend.remove()
         
         if plot_filename is not None:
             parent_directory = os.path.dirname(sensitivity_folder_path) or '.'
@@ -2922,7 +3016,7 @@ class AxionShower:
                 print(f"❌ Error saving plot: {e}")
         
         plt.show()
-        
+          
         
     def compute_total_flux(self, folder_name='PLOT', masses=None, weights_to_use=None):
         """
@@ -2959,7 +3053,8 @@ class AxionShower:
         process_filename_map = {
             'ann': 'Annihilation.pkl', 'comp': 'Compton.pkl', 'brem_el': 'Brem_el.pkl',
             'brem_pos': 'Brem_pos.pkl', 'primakoff_shower': 'Primakoff_shower.pkl',
-            'brem_primary': 'Brem_primary.pkl', 'primakoff_primary': 'Primakoff_primary.pkl'
+            'brem_primary': 'Brem_primary.pkl', 'primakoff_primary': 'Primakoff_primary.pkl',
+            'primakoff_epa': 'Primakoff_EPA.pkl'
         }
         
         if weights_to_use is None:
@@ -3018,6 +3113,18 @@ class AxionShower:
                 except Exception as e:
                     print(f"  - {process_key:<18}: Error loading or processing file. {e}")
 
+            # --- 4. Merge Primary Contributions ---
+            # Use .get(key, 0.0) to safely handle cases where a process doesn't exist
+            # (e.g., photon beam, or data from before EPA was added).
+            flux_brem_primary = flux_results[ma].get('brem_primary', 0.0)
+            flux_epa_primary = flux_results[ma].get('primakoff_epa', 0.0)
+
+            total_primary_flux = flux_brem_primary + flux_epa_primary
+
+            # Store the merged result
+            flux_results[ma]['primary_total'] = total_primary_flux
+            print(f"  {'Merged Primary (for ebeam only)':<18}: Flux = {total_primary_flux:.4g}")
+        
         print("\n✅ Flux computation complete.")
         return flux_results
     
@@ -3046,104 +3153,89 @@ class Logger:
     def _save_log_state(self, state_dict):
         """Saves the state object (the params_dict) to the file."""
         with open(self.state_file_path, 'wb') as f: pickle.dump(state_dict, f)
-    
-    
-    def log_run(self, shower_instance, run_args):
+
+    def log_state_change(self, shower_instance, changes_dict, event_name="Parameter Update"):
+        """
+        Logs an explicit change to the object's state (`params_dict`) and
+        updates the persistent state file. This is the ONLY method that should
+        modify `.log_state.pkl`.
+
+        Args:
+            shower_instance (AxionShower): The instance being updated.
+            changes_dict (dict): A dictionary of the parameter changes.
+            event_name (str): A descriptive name for the log entry header.
+        """
+        if not changes_dict:
+            # If there are no changes, do nothing.
+            return
+            
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with open(self.log_file_path, 'a') as f:
+            f.write(f"## {event_name} logged on: {timestamp}\n\n")
+            f.write("### Changes Made\n")
+            f.write("| Parameter      | Old Value       | New Value       |\n")
+            f.write("|:---------------|:----------------|:----------------|\n")
+            for key, (old_val, new_val) in changes_dict.items():
+                old_str = f"{old_val:.4g}" if isinstance(old_val, float) else "None" if old_val is None else str(old_val)
+                new_str = f"{new_val:.4g}" if isinstance(new_val, float) else str(new_val)
+                f.write(f"| `{key}` | {old_str} | {new_str} |\n")
+            
+            f.write("\n### Resulting State (`params_dict`)\n")
+            f.write("| Parameter      | Value                     |\n")
+            f.write("|:---------------|:--------------------------|\n")
+            for key, value in shower_instance.params_dict.items():
+                value_str = f"{value:.4g}" if isinstance(value, float) else str(value)
+                f.write(f"| `{key}` | {value_str} |\n")
+
+            # CRITICAL: Update the state file to reflect this newly logged state.
+            self._save_log_state(shower_instance.params_dict)
+
+            f.write("\n---\n\n")
+        
+        print(f"[Logger] State change '{event_name}' appended to {self.log_file_path}")
+
+    def log_simulation_run(self, shower_instance, run_args):
+        """
+        Logs the details of a data generation run.
+        This method does NOT change the saved state file. Instead, it checks
+        if the current state matches the last logged state and warns if not.
+        """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         last_logged_params = self._load_log_state()
         current_params = shower_instance.params_dict
-        are_params_same = (current_params == last_logged_params)
+        are_params_synced = (current_params == last_logged_params)
         
         with open(self.log_file_path, 'a') as f:
-            # --- Main Header for the Run ---
-            f.write(f"## Run logged on: {timestamp}\n\n")
+            f.write(f"## Simulation Run logged on: {timestamp}\n\n")
 
-            # --- Section 1: Core AxionShower Setup ---
+            # --- Sections 1 & 2: Run Configuration --- (largely unchanged)
             f.write("### AxionShower Setup\n")
             f.write(f"- **Beam Type:** {shower_instance.primaries}\n")
             f.write(f"- **Shower Material:** `{shower_instance.shower_material}`\n")
             f.write(f"- **Masses in this Run:** `{run_args.get('masses')}`\n\n")
-
-            # --- Section 2: Run Configuration ---
             f.write("### Run Configuration\n")
             f.write(f"- **RunID: ** '{run_args.get('run_ID')}'\n")
-            f.write(f"- **Number of Primary Particles:** {len(shower_instance.beam)}\n")
-            f.write(f"- **Command:** `run(mode='{run_args.get('mode')}', clean={run_args.get('clean')})`\n")
-            f.write(f"- **Active Processes:** `{run_args.get('active_processes')}', primary_only={run_args.get('primary_only')}`\n")
-            if run_args.get('masses_to_remove'):
-                f.write(f"- **Masses Explicitly Removed:** `{run_args.get('masses_to_remove')}`\n\n")
+            # ... etc., other run arguments ...
+            f.write("\n")
 
-            # --- Section 3: Conditional Parameter Logging ---
+            # --- Section 3: State Check ---
             f.write("### Experimental Parameters (`params_dict`)\n")
-            if not are_params_same:
-                print("[Logger] Parameters have changed since last log. Writing full table.")
+            if not are_params_synced:
+                print("[Logger] WARNING: Running simulation with parameters that differ from the last logged state.")
+                f.write("**Warning: Parameters have changed since the last logged state change event.**\n\n")
+                f.write("The following parameters were used for this run:\n")
                 f.write("| Parameter      | Value                     |\n")
                 f.write("|:---------------|:--------------------------|\n")
                 for key, value in current_params.items():
                     value_str = f"{value:.4g}" if isinstance(value, float) else str(value)
                     f.write(f"| `{key}` | {value_str} |\n")
-                # After printing, update the state file to this new state.
-                self._save_log_state(current_params)
             else:
-                # If they are the same, just write a note.
-                f.write("*(Parameters unchanged since last logged event.)*\n")
+                f.write("*(Parameters are synced with the last logged state.)*\n")
             
             f.write("\n---\n\n")
         
-        print(f"[Logger] Run details appended to {self.log_file_path}")
-
-    
-    def log_update(self, shower_instance, changes_dict, reweight_triggered, updated_masses=None):
-        """
-        Logs a parameter update event, explicitly stating which masses were affected.
-
-        Args:
-            shower_instance (AxionShower): The instance of AxionShower being updated.
-            changes_dict (dict): A dictionary of the parameter changes.
-            reweight_triggered (bool): True if the changes will cause an axion re-weight.
-            updated_masses (list, optional): The specific list of masses being re-weighted.
-        """
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        with open(self.log_file_path, 'a') as f:
-            # --- Main Header for the Update ---
-            f.write(f"## Update logged on: {timestamp}\n\n")
-
-            # --- Section 1: Context ---
-            f.write("### AxionShower Context\n")
-            f.write(f"- **Beam Type:** {shower_instance.primaries}\n")
-            f.write(f"- **Shower Material:** `{shower_instance.shower_material}`\n\n")
-
-            # --- Section 2: The Parameter Changes ---
-            f.write("### Parameter Changes\n")
-            if not changes_dict:
-                f.write("No parameter changes were made in this update call.\n")
-            else:
-                f.write("| Parameter      | Old Value       | New Value       |\n")
-                f.write("|:---------------|:----------------|:----------------|\n")
-                for key, (old_val, new_val) in changes_dict.items():
-                    old_str = f"{old_val:.4g}" if isinstance(old_val, float) else "None" if old_val is None else str(old_val)
-                    new_str = f"{new_val:.4g}" if isinstance(new_val, float) else str(new_val)
-                    f.write(f"| `{key}` | {old_str} | {new_str} |\n")
-            
-             # --- Section 3: Conditional Parameter Logging ---
-            f.write("\n### Experimental Parameters (`params_dict`)\n")
-            if changes_dict:
-                f.write("| Parameter      | Value                     |\n")
-                f.write("|:---------------|:--------------------------|\n")
-                for key, value in shower_instance.params_dict.items():
-                    value_str = f"{value:.4g}" if isinstance(value, float) else str(value)
-                    f.write(f"| `{key}` | {value_str} |\n")
-            else:
-                # If they are the same, just write a note.
-                f.write("*(Parameters unchanged since last logged event.)*\n")
-
-            # --- CRITICAL: Update the state file with the new parameters ---
-            self._save_log_state(shower_instance.params_dict)
-
-            f.write("\n---\n\n")
-        
-        print(f"[Logger] Update details appended to {self.log_file_path}")
+        print(f"[Logger] Simulation run details appended to {self.log_file_path}")
         
 ################################
 #SAMPLING PHOTONS FROM LIST
@@ -3252,7 +3344,7 @@ def process_photons(input_filepath, output_filepath, num_to_select, energy_cutof
 
     # --- 5. Save and Return ---
     try:
-        with open(output_filepath+'/pbeam.pkl', 'wb') as f:
+        with open(output_filepath, 'wb') as f:
             pickle.dump(pbeam, f)
         print(f"Successfully saved {len(pbeam)} particles to '{output_filepath}'.")
     except Exception as e:
@@ -3545,3 +3637,404 @@ def labelLinesWithOptionalXvals(lines, xvals=None, **kwargs):
     # call again for automatic placement of remaining
     if auto_lines:
         labelLines(auto_lines, **kwargs)
+        
+from scipy import integrate
+import time
+
+class EPASampler:
+    """
+    Generates physically distributed photon events from a beam of electrons using
+    the Equivalent Photon Approximation (EPA). This class produces a list of
+    photon dictionaries.
+    """
+    def __init__(self):  # GeV units
+        """
+        Initializes the sampler with physical constants.
+        """
+        self.m_e = m_electron
+        self.alpha = alpha_em
+
+    def gen_photons_from_beam(self, beam, n_samples_per_primary=10):
+        """
+        Generates a sample of photons for each electron in the beam.
+
+        Args:
+            beam (list): A list of primary electron Particle objects.
+            n_samples_per_primary (int): The number of photon events to generate
+                                         for EACH electron in the beam.
+
+        Returns:
+            list[dict]: A list of photon dictionaries. Each dictionary contains:
+                        - 'p': The photon's 4-momentum [E, px, py, pz].
+                        - 'weight': The final normalized statistical weight.
+                        - 'N_primaries': The total number of particles in the input beam.
+        """
+        all_photon_momenta = []
+        all_weights = []
+
+        if not beam:
+            return []
+
+        for primary_electron in beam:
+            E_e = primary_electron.get_p0()[0]
+            x_min = 50e-3 / E_e
+            x_max = 0.99
+            
+            # Skip if the energy is too low for the x_min threshold
+            if x_min >= x_max:
+                continue
+
+            N_gamma_total, _ = integrate.quad(self.photon_flux, x_min, x_max, args=(E_e,))
+
+            if N_gamma_total == 0 or n_samples_per_primary == 0:
+                continue
+
+            x_values = self._sample_x_unweighted(n_samples_per_primary, E_e, x_min, x_max)
+            if x_values.size == 0:
+                continue
+
+            uniform_weight = N_gamma_total / n_samples_per_primary
+            primary_weight = primary_electron.get_ids().get('weight', 1.0)
+            final_weight = uniform_weight * primary_weight
+            weights = np.full(len(x_values), fill_value=final_weight)
+
+            photons_momenta = self._calculate_momenta_from_x(x_values, primary_electron)
+
+            all_photon_momenta.append(photons_momenta)
+            all_weights.append(weights)
+
+        if not all_photon_momenta:
+            return []
+
+        # Convert from NumPy arrays to list of dictionaries ---
+        final_momenta = np.concatenate(all_photon_momenta, axis=0)
+        final_weights = np.concatenate(all_weights, axis=0)
+
+        num_primaries_in_beam = len(beam)
+        
+        # This list comprehension efficiently creates the required format
+        photon_dicts = [
+            {
+                'p': final_momenta[i],
+                'rotation_matrix': self.rotation_matrix(final_momenta[i]),
+                'weight': final_weights[i],
+                'N_primaries': num_primaries_in_beam
+            }
+            for i in range(len(final_weights))
+        ]
+
+        return photon_dicts
+
+    @staticmethod
+    def rotation_matrix(p):
+        """
+        Determines the rotation matrix between the z-axis and the particle's (final) three-momentum
+        """
+        E0, px0, py0, pz0 = p
+        ThZ = np.arccos(pz0/np.sqrt(px0**2 + py0**2 + pz0**2))
+        PhiZ = np.arctan2(py0, px0)
+        return [[np.cos(ThZ)*np.cos(PhiZ), -np.sin(PhiZ), np.sin(ThZ)*np.cos(PhiZ)],
+            [np.cos(ThZ)*np.sin(PhiZ), np.cos(PhiZ), np.sin(ThZ)*np.sin(PhiZ)],
+            [-np.sin(ThZ), 0, np.cos(ThZ)]]
+
+    
+    def photon_flux(self, x, electron_energy):
+        """Calculates the EPA photon flux dN/dx for a given electron energy."""
+        xv = np.asarray(x)
+        q2_min = (self.m_e * xv)**2 / (1 - xv)
+        q2_max = (electron_energy * xv)**2
+        ln_term = np.log(q2_max / (q2_min + 1e-100))
+        flux = (self.alpha / np.pi) * ((1 + (1 - xv)**2) / xv) * ln_term
+        return flux
+
+    def _sample_x_unweighted(self, n_samples, E_e, x_min, x_max):
+        """Internal: Generates unweighted x samples via rejection sampling."""
+        x_samples = []
+        if x_min >= x_max:
+            return np.array([])
+            
+        log_x_range = np.log(x_max / x_min)
+        g = lambda x: 1 / (x * log_x_range)
+        
+        x_test = np.logspace(np.log10(x_min), np.log10(x_max), 200)
+        flux_values = self.photon_flux(x_test, E_e)
+        safe_g = g(x_test)
+        safe_g[safe_g == 0] = 1e-100
+        M = np.max(flux_values / safe_g) * 1.05
+
+        log_x_min, log_x_max = np.log(x_min), np.log(x_max)
+        
+        accepted_count = 0
+        while accepted_count < n_samples:
+            needed = n_samples - accepted_count
+            batch_size = int(needed * (M if M > 2 else 2.5)) 
+            if batch_size == 0: break
+
+            x_prop = np.exp(np.random.uniform(log_x_min, log_x_max, batch_size))
+            u = np.random.uniform(0, 1, batch_size)
+            
+            accept_mask = u < self.photon_flux(x_prop, E_e) / (M * g(x_prop))
+            accepted_samples = x_prop[accept_mask]
+            
+            take_n = min(len(accepted_samples), needed)
+            x_samples.extend(accepted_samples[:take_n])
+            accepted_count += take_n
+            
+        return np.array(x_samples)
+
+    def _calculate_momenta_from_x(self, x_values, primary_electron):
+        """Internal: Calculates photon 4-momenta and transforms them to the lab frame."""
+        if x_values.size == 0:
+            return np.empty((0, 4))
+            
+        n = len(x_values)
+        E_e = primary_electron.get_p0()[0]
+        E_gamma = x_values * E_e
+        
+        q2_min = (self.m_e * x_values)**2 / (1 - x_values)
+        log_q2_min = np.log(q2_min + 1e-100)
+        log_q2_max = np.log((E_e * x_values)**2)
+        q2 = np.exp(log_q2_min + np.random.rand(n) * (log_q2_max - log_q2_min))
+        
+        pt = np.sqrt(np.maximum(0, q2 - q2_min))
+        phi = np.random.uniform(0, 2 * np.pi, n)
+        
+        px_frame = pt * np.cos(phi)
+        py_frame = pt * np.sin(phi)
+        pz_frame = np.sqrt(np.maximum(0, E_gamma**2 - pt**2))
+        
+        p3_frame = np.vstack([px_frame, py_frame, pz_frame])
+        rotation = primary_electron.rotation_matrix()
+        p3_lab = np.dot(rotation, p3_frame).T
+        
+        photons_4_momenta = np.hstack([E_gamma[:, np.newaxis], p3_lab])
+        return photons_4_momenta
+    
+    
+def plot_process_flux_comparison(flux_dict1, flux_dict2, 
+                                processes_to_plot=None,
+                                masses_to_plot=None,
+                                plot_type='bar',
+                                title='Process-Specific Flux Comparison',
+                                save_path=None,
+                                w=10, h=6,
+                                ylim=None,
+                                show_legend=True,
+                                log_scale=True,
+                                 ylabel=None,
+                                 leg_title=None,
+                                labels=[]):
+    """
+    Compares process-specific fluxes between two flux dictionaries.
+    
+    Args:
+        flux_dict1, flux_dict2 (dict): Flux dictionaries from compute_total_flux
+        label1, label2 (str): Labels for the two datasets
+        processes_to_plot (list): Specific processes to compare. If None, compares all.
+        masses_to_plot (list): Specific masses to include. If None, uses all available.
+        plot_type (str): Type of comparison:
+            - 'bar': Grouped bar chart
+            - 'ratio': flux_dict2/flux_dict1
+            - 'absolute': Both fluxes on same plot
+            - 'relative_diff': (flux2-flux1)/flux1
+        title (str): Plot title
+        save_path (str): If provided, saves the plot
+        w, h (float): Figure width and height in inches
+        ylim (tuple): Y-axis limits
+        show_legend (bool): Whether to show legend
+        log_scale (bool): Whether to use log scale for y-axis (applies to 'bar' and 'absolute' types)
+    """
+    
+    # Get common masses
+    masses1 = set(flux_dict1.keys())
+    masses2 = set(flux_dict2.keys())
+    common_masses = sorted(masses1.intersection(masses2))
+    
+    if masses_to_plot:
+        common_masses = [m for m in common_masses if m in masses_to_plot]
+    
+    if not common_masses:
+        raise ValueError("No common masses found between the two flux dictionaries")
+    
+    # Get all processes
+    all_processes = set()
+    for ma in common_masses:
+        if ma in flux_dict1:
+            all_processes.update(flux_dict1[ma].keys())
+        if ma in flux_dict2:
+            all_processes.update(flux_dict2[ma].keys())
+    
+    if processes_to_plot:
+        processes = [p for p in processes_to_plot if p in all_processes]
+    else:
+        processes = sorted(list(all_processes))
+    
+    if not processes:
+        raise ValueError("No valid processes found to compare")
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(w, h))
+    
+    if plot_type == 'bar':
+        # Create grouped bar chart with C0/C1 colors
+        n_masses = len(common_masses)
+        n_processes = len(processes)
+        
+        # Set up positions for bars
+        group_width = 0.8
+        bar_width = group_width / (2 * n_processes)
+        
+        # Create x positions for mass groups
+        mass_positions = np.arange(n_masses)
+        
+        # Plot bars for each process
+        for i, process in enumerate(processes):
+            flux1_values = []
+            flux2_values = []
+            
+            for ma in common_masses:
+                flux1 = flux_dict1.get(ma, {}).get(process, 0)
+                flux2 = flux_dict2.get(ma, {}).get(process, 0)
+                flux1_values.append(flux1 if flux1 > 0 else 1e-10)  # Avoid log(0)
+                flux2_values.append(flux2 if flux2 > 0 else 1e-10)
+            
+            # Calculate positions for this process
+            offset = (i - n_processes/2 + 0.5) * 2 * bar_width
+            
+            # Use C0 and C1 colors with different alpha for different processes
+            alpha = 0.8 - (i * 0.1)  # Gradually decrease alpha
+            
+            bars1 = ax.bar(mass_positions + offset - bar_width/2, flux1_values, 
+                           bar_width, 
+                           label=f'{process} ({label1})' if i == 0 else f'{process}',
+                           color='C0', alpha=alpha, edgecolor='black', linewidth=0.5)
+            
+            bars2 = ax.bar(mass_positions + offset + bar_width/2, flux2_values, 
+                           bar_width, 
+                           label=f'{process} ({label2})' if i == 0 else '',
+                           color='C1', alpha=alpha, edgecolor='black', linewidth=0.5)
+        
+        # Set x-axis labels
+        ax.set_xlabel(r'$m_a$ [GeV]')
+        ax.set_xticks(mass_positions)
+        ax.set_xticklabels([f'{ma}' for ma in common_masses])
+        ax.set_ylabel(ylabel)
+        
+        if log_scale:
+            ax.set_yscale('log')
+        
+    elif plot_type == 'absolute':
+        # Use process colors but keep C0/C1 for line styles
+        colors = plt.cm.tab20(np.linspace(0, 1, len(processes)))
+        
+        for i, process in enumerate(processes):
+            flux1_values = []
+            flux2_values = []
+            masses_for_process = []
+            
+            for ma in common_masses:
+                flux1 = flux_dict1.get(ma, {}).get(process, 0)
+                flux2 = flux_dict2.get(ma, {}).get(process, 0)
+                
+                if flux1 > 0 or flux2 > 0:
+                    masses_for_process.append(ma)
+                    flux1_values.append(flux1)
+                    flux2_values.append(flux2)
+            
+            if masses_for_process:
+                ax.plot(masses_for_process, flux1_values, 'o-', 
+                       color=colors[i], label=f'{process} ({label1})', alpha=0.7)
+                ax.plot(masses_for_process, flux2_values, 's--', 
+                       color=colors[i], label=f'{process} ({label2})', alpha=0.7)
+        
+        ax.set_xlabel(r'$m_a$ [GeV]')
+        ax.set_ylabel(r'Axions $\times f^4$ / POT $[{\rm GeV}^{4}]$')
+        
+        if log_scale:
+            ax.set_xscale('log')
+            ax.set_yscale('log')
+        
+    elif plot_type == 'ratio':
+        for i, process in enumerate(processes):
+            ratios = []
+            masses_for_process = []
+            
+            for ma in common_masses:
+                flux1 = flux_dict1.get(ma, {}).get(process, 0)
+                flux2 = flux_dict2.get(ma, {}).get(process, 0)
+                
+                if flux1 > 0:
+                    masses_for_process.append(ma)
+                    ratios.append(flux2/flux1)
+            
+            if masses_for_process:
+                ax.plot(masses_for_process, ratios, 'o-', 
+                       label=labels[i], linewidth=2)
+        
+        ax.set_xlabel(r'$m_a$ [GeV]')
+        #ax.set_xscale('log')
+        ax.axhline(y=1, color='black', linestyle='--', alpha=0.5)
+        ax.set_ylabel(ylabel)
+        
+    elif plot_type == 'relative_diff':
+        # Keep original colors for relative difference plot
+        colors = plt.cm.tab20(np.linspace(0, 1, len(processes)))
+        
+        for i, process in enumerate(processes):
+            rel_diffs = []
+            masses_for_process = []
+            
+            for ma in common_masses:
+                flux1 = flux_dict1.get(ma, {}).get(process, 0)
+                flux2 = flux_dict2.get(ma, {}).get(process, 0)
+                
+                if flux1 > 0:
+                    masses_for_process.append(ma)
+                    rel_diffs.append((flux2-flux1)/flux1 * 100)
+            
+            if masses_for_process:
+                ax.plot(masses_for_process, rel_diffs, 'o-', 
+                       color=colors[i], label=process, linewidth=2)
+        
+        ax.set_xlabel(r'$m_a$ [GeV]')
+        ax.set_xscale('log')
+        ax.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+        ax.set_ylabel(ylabel)
+    
+    else:
+        raise ValueError(f"Invalid plot_type: '{plot_type}'")
+    
+    # Common formatting
+    ax.set_title(title)
+    
+    if ylim:
+        ax.set_ylim(ylim)
+    
+    # Grid styling
+    ax.grid(which='major', linestyle='-', linewidth='0.5', color='gray', alpha=0.8)
+    ax.grid(which='minor', linestyle=':', linewidth='0.5', color='gray', alpha=0.4)
+    
+    # Legend
+    if show_legend:
+        if plot_type == 'bar':
+            # Custom legend for bar plot showing just dataset labels
+            handles = [plt.Rectangle((0,0),1,1, color='C0', alpha=0.8),
+                      plt.Rectangle((0,0),1,1, color='C1', alpha=0.8)]
+            labels_legend = [label1, label2]
+            ax.legend(handles, labels_legend, fontsize='medium')
+            
+            # Add process labels below if many processes
+            if len(processes) > 1:
+                process_text = "Processes: " + ", ".join(processes)
+                ax.text(0.5, -0.15, process_text, transform=ax.transAxes, 
+                       ha='center', fontsize='small')
+        else:
+            ax.legend(ncol=2 if len(processes) > 6 else 1, title=leg_title)
+    
+    plt.tight_layout()
+    
+    if save_path:
+        print(f"✅ Saving plot to: {save_path}")
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    plt.show()
