@@ -1,10 +1,6 @@
-Of course. Here is the README file in a raw Markdown format. You can copy the entire content from the block below and paste it directly into a `.md` file.
+# `ALPETITE`: A Simulation & Analysis Wrapper for PETITE
 
----
-
-# `AxionShower`: A Simulation & Analysis Wrapper for PETITE
-
-The `AxionShower` class is a high-level Python interface designed to manage the end-to-end workflow of simulating axion-like particle (ALP) production in beam dump experiments. It acts as an intelligent orchestrator for the core physics calculations provided by the **PETITE** package, wrapping them in a robust, reproducible, and user-friendly framework.
+The core of `ALPETITE` is the `AxionShower` class is a high-level Python interface designed to manage the end-to-end workflow of simulating axion-like particle (ALP) production in beam dump experiments. It acts as an intelligent orchestrator for the core physics calculations provided by the **PETITE** package, wrapping them in a robust, reproducible, and user-friendly framework.
 
 ## Core Features
 
