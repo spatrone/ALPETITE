@@ -2218,11 +2218,10 @@ class AxionShower:
             overwrite (bool, optional): If True, existing output files will be overwritten.
             run_ids_to_include (list, optional): A list of run_ids to include. Defaults to all.
             *
-            Ndiscovery (float): The required number of events for discovery. MUST be provided.
             gaee_coeff (float): The axion-electron coupling constant. MUST be provided.
             gayy_coeff (float): The axion-photon coupling constant. MUST be provided.
             **optional_exp_params: Other optional keyword arguments to override for this run
-                (e.g., POT=1e22, Lpipe=150, Ecut=0.5).
+                (e.g., Lpipe=150, Ecut=0.5, angle_accept=0.01123).
 
         Returns:
             dict: A dictionary mapping mass values to their output directories.
@@ -2530,7 +2529,7 @@ class AxionShower:
         ax.set_ylabel(ylabel)
 
         if len(masses) == 1:
-            ax.set_title(fr'Axion Flux for $m_a = {int(masses[0]*1000)}$ MeV' + plot_title)
+            ax.set_title(fr'Axion Event Rate for $m_a = {int(masses[0]*1000)}$ MeV' + plot_title)
         else:
             ax.set_title(r'Axion Flux Comparison' + plot_title)
 
@@ -2885,7 +2884,7 @@ class AxionShower:
         BEHAVIOR_KEYS = {
             'plot', 'label', 'fill', 'fill_above', 'fill_below', 'close_curve',
             'named_line', 'label_x_pos', 'ma_max', 'plot_low', 'plot_up',
-            'line_specs', 'fill_specs' # These are also special keys
+            'line_specs', 'fill_specs','skip_masses' # These are also special keys
         }
 
         for process_name in final_plot_order:
@@ -2895,6 +2894,11 @@ class AxionShower:
             params = plot_params_map.get(process_name, {})
             
             if not params.get('plot', True): continue
+            
+            process_skip_masses = params.get('skip_masses', [])
+            process_skip_masses_set = set(process_skip_masses)
+            if process_skip_masses_set:
+                print(f"🚫 For process '{process_name}', skipping masses: {sorted(list(process_skip_masses_set))}")
 
             # --- Build kwargs from specs ---
             # 1. Start with plot-wide defaults.
@@ -2920,15 +2924,26 @@ class AxionShower:
 
             # --- Data Processing and Plotting ---
             if 'x_values' in data_dict and 'y_values' in data_dict:
+                x_vals, y_vals = data_dict['x_values'], data_dict['y_values']
+                if process_skip_masses_set:
+                    filtered_data = [(x, y) for x, y in zip(x_vals, y_vals) if x not in process_skip_masses_set]
+                    if not filtered_data: continue
+                    x_vals, y_vals = zip(*filtered_data)
+                
                 line_kwargs['label'] = label
-                line, = plt.plot(data_dict['x_values'], data_dict['y_values'], **line_kwargs)
+                line, = plt.plot(x_vals, y_vals, **line_kwargs)
                 if params.get('named_line', False):
                     lines_to_be_labeled.append(line)
                     label_x_pos.append(params.get('label_x_pos',None))
                 continue
-
-            all_ma_points = sorted([ma for ma, bounds in data_dict.items() if bounds and (bounds[0] is not None or bounds[1] is not None)])
+            
+            ### MODIFIED ### Use the new process-specific set for filtering
+            all_ma_points = sorted([ma for ma, bounds in data_dict.items() 
+                                    if bounds and (bounds[0] is not None or bounds[1] is not None)
+                                    and ma not in process_skip_masses_set])
+            
             if not all_ma_points: continue
+            
             ma_list_low = [ma for ma in all_ma_points if data_dict[ma][0] is not None and not np.isnan(data_dict[ma][0])]
             c_values_dwn = [data_dict[ma][0] for ma in ma_list_low]
             ma_list_up = [ma for ma in all_ma_points if data_dict[ma][1] is not None and not np.isnan(data_dict[ma][1])]
@@ -3100,7 +3115,7 @@ class AxionShower:
                         
                     # Calculate the sum of the product of weights for all axions
                     total_flux = sum(
-                        np.prod([axion.get(w_key, 1.0) for w_key in weights_to_use])
+                        np.prod([axion[w_key] for w_key in weights_to_use])
                         for axion in axion_list
                     )
                     
@@ -3358,7 +3373,7 @@ def plot_flux_comparison(flux_dicts, labels, plot_type='line',
                          title=r'Axion Flux Comparison: Shower vs. Primary', 
                          save_path=None, 
                          w=6, h=4.5,
-                         legend_title='Flux Source', ylim=None):
+                         legend_title=None, ylim=None):
     """
     Plots a publication-quality comparison of aggregated "Shower" vs. "Primary" fluxes.
 
