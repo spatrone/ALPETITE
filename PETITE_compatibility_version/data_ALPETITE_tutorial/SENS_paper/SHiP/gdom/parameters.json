@@ -1,0 +1,22 @@
+{
+    "Lpipe": 50.0,
+    "l0": 33.5,
+    "A_detector": 24.0,
+    "Ecut": 0.2,
+    "POT": 6e+20,
+    "shower_material": "molybdenum",
+    "primaries": "photons",
+    "inelastic_on": true,
+    "shower_cutoff": 0.05,
+    "rho": 10.2,
+    "ndensity": 6.401709223553934e+22,
+    "angle_accept": 0.02933520650039734,
+    "me": 0.0005109989499999999,
+    "alpha_em": 0.007297352573756914,
+    "mT": 95.95,
+    "Z_T": 42,
+    "A_T": 95.95,
+    "gaee_coeff": 1.2149681893386292e-07,
+    "gayy_coeff": 0.0023228194671955555,
+    "N_discovery": 5
+}

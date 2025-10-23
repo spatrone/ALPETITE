@@ -729,12 +729,12 @@ class DarkShower(Shower):
         V_dict["generation_process"] = process
         V_dict["weight"] = wg*init_IDs["weight"]
         
-        #SamADD_START
+        #SAMmod_START
         if process=="DarkBrem":
             V_dict["kinematics_vars"]=np.array(sample_event)
             V_dict["parent_E"]=E0
             V_dict["diff_x_sec"]=diff_x_sec
-        #SamADD_END
+        #SAMmod_END
         
         if process == "DarkAnn" and self.bound_electron:
             V_dict["generation_process"] = "DarkAnn_bound"

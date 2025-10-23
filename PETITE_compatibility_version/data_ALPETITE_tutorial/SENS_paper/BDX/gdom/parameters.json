@@ -1,0 +1,22 @@
+{
+    "Lpipe": 3.0,
+    "l0": 20.0,
+    "A_detector": 0.275,
+    "Ecut": 0.3,
+    "POT": 1e+22,
+    "shower_material": "aluminum",
+    "primaries": "electrons",
+    "inelastic_on": true,
+    "shower_cutoff": 0.05,
+    "rho": 2.699,
+    "ndensity": 6.0197696296296294e+22,
+    "angle_accept": 0.013110110602126895,
+    "me": 0.0005109989499999999,
+    "alpha_em": 0.007297352573756914,
+    "mT": 27,
+    "Z_T": 13,
+    "A_T": 27,
+    "gaee_coeff": 1.2149681893386292e-07,
+    "gayy_coeff": 0.0023228194671955555,
+    "N_discovery": 5
+}
