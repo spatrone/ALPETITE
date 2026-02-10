@@ -17,6 +17,17 @@ This README mirrors the workflow shown in `Tutorial.ipynb`: initialize a shower,
    - your PETITE home directory, and
    - VEGAS precomputed dictionaries needed for vector-based processes (e.g. `Ann+Comp`, `Brem`) at the masses you run.
 
+### Non-common required libraries
+
+Besides standard scientific Python tooling, ALPETITE relies on the following less-common dependencies:
+
+- **PETITE** (external package/repository): required backend toolkit used by ALPETITE.
+- **vegas**: Monte Carlo integrator used by PETITE/ALPETITE workflows.
+- **particletools** (PETITE ecosystem utilities, if your PETITE setup requires it): helper particle/data utilities.
+
+> Note: exact install commands depend on how you installed PETITE (editable source install, environment file, etc.).
+> If in doubt, install PETITE first and then install any missing imports reported when running `from ALPs import *`.
+
 ## Quickstart (from the tutorial)
 
 ### 1) Import and initialize
