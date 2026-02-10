@@ -120,7 +120,7 @@ AxSh.plot_histo_flux(0.1, ylim=[1e-9, 1])
 
 AxSh.plot_histo_flux(
     [0.1, 0.3],
-    weights_to_use=['w_prod_rescaled', 'w_prim'],
+    weights_to_use=['w_prod_scaled', 'w_prim'],
     processes_to_plot=['primakoff_shower'],
     ylim=[1e-2, 1e2],
     ylabel=r'Axions $\\times f^2$ / POT $[{\\rm GeV}^{2}]$',
