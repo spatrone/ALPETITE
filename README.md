@@ -1,6 +1,6 @@
 # ALPETITE
 
-`ALPETITE` is a simulation and analysis wrapper around [`PETITE`](https://github.com/kjkellyphys/PETITE) for axion-like particle (ALP) studies in electron-beam experiments.
+`ALPETITE` is a simulation and analysis wrapper around [`PETITE`](https://github.com/kjkellyphys/PETITE) for axion-like particle (ALP) studies in electron and proton-beam experiments.
 
 This README mirrors the workflow shown in `Tutorial.ipynb`: initialize a shower, run production simulations, finalize and reweight events, compute sensitivities, and visualize flux/sensitivity outputs.
 
